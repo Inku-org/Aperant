@@ -37,6 +37,8 @@
     "activeIssues": "active issues",
     "refresh": "Refresh"
   },
+  "investigating": "Investigating...",
+  "queuedForInvestigation": "Queued for investigation...",
   "proposedSolution": "Proposed Solution",
   "affectedFiles": "Affected Files",
   "impactScore": "Impact Score",

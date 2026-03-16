@@ -13,6 +13,7 @@ import {
   ArrowDown,
   Minus,
   Gauge,
+  Loader2,
 } from "lucide-react";
 import { Badge } from "../../ui/badge";
 import { Button } from "../../ui/button";
@@ -77,6 +78,7 @@ export function IssueDetail({
   issue,
   onInvestigate,
   investigationResult,
+  investigationStatus,
   linkedTaskId,
   onViewTask,
   projectId,
@@ -94,6 +96,14 @@ export function IssueDetail({
       onViewTask(taskId);
     }
   };
+
+  // Check if investigation is currently running for THIS issue
+  const isInvestigatingThis =
+    investigationStatus &&
+    investigationStatus.issueId === issue.id &&
+    investigationStatus.phase !== "idle" &&
+    investigationStatus.phase !== "complete" &&
+    investigationStatus.phase !== "error";
 
   return (
     <ScrollArea className="flex-1">
@@ -176,11 +186,31 @@ export function IssueDetail({
               <Eye className="h-4 w-4 mr-2" />
               {t("linear.viewTask", "View Task")}
             </Button>
+          ) : isInvestigatingThis ? (
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {investigationStatus?.message ||
+                    t("linear.investigating", "Investigating...")}
+                </span>
+                <span className="text-foreground">
+                  {investigationStatus?.progress ?? 0}%
+                </span>
+              </div>
+              <Progress
+                value={investigationStatus?.progress ?? 0}
+                className="h-2"
+              />
+            </div>
           ) : (
-            <Button onClick={onInvestigate} className="flex-1">
-              <Sparkles className="h-4 w-4 mr-2" />
-              {t("linear.investigate", "Investigate & Create Task")}
-            </Button>
+            <div className="flex-1 flex items-center justify-center py-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              {t(
+                "linear.queuedForInvestigation",
+                "Queued for investigation...",
+              )}
+            </div>
           )}
         </div>
 

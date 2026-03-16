@@ -1,6 +1,16 @@
-import type { LinearIssue, LinearInvestigationResult, LinearInvestigationStatus, } from '../../../../shared/types';
+import type {
+  LinearIssue,
+  LinearInvestigationResult,
+  LinearInvestigationStatus,
+} from "../../../../shared/types";
 
-export type LinearFilterState = 'all' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
+export type LinearFilterState =
+  | "all"
+  | "backlog"
+  | "unstarted"
+  | "started"
+  | "completed"
+  | "canceled";
 
 export interface LinearIssuesProps {
   onOpenSettings?: () => void;
@@ -19,6 +29,7 @@ export interface LinearIssueDetailProps {
   issue: LinearIssue;
   onInvestigate: () => void;
   investigationResult: LinearInvestigationResult | null;
+  investigationStatus?: LinearInvestigationStatus;
   /** ID of existing task linked to this issue (from metadata.linearIssueId) */
   linkedTaskId?: string;
   /** Handler to navigate to view the linked task */

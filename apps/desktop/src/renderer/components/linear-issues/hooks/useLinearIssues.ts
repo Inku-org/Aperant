@@ -70,17 +70,18 @@ export function useLinearIssues(projectId: string | undefined) {
             ),
         );
 
-        // Detect new active issues (not completed/canceled)
+        // Detect active issues that need investigation.
+        // On first load (knownIssueIdsRef empty): ALL active issues are "new".
+        // On subsequent loads: only issues not previously seen are "new".
         const detected: LinearIssue[] = [];
-        if (knownIssueIdsRef.current.size > 0) {
-          for (const issue of issues) {
-            if (
-              !knownIssueIdsRef.current.has(issue.id) &&
-              issue.state.type !== "completed" &&
-              issue.state.type !== "canceled"
-            ) {
-              detected.push(issue);
-            }
+        const isFirstLoad = knownIssueIdsRef.current.size === 0;
+        for (const issue of issues) {
+          if (
+            issue.state.type !== "completed" &&
+            issue.state.type !== "canceled" &&
+            (isFirstLoad || !knownIssueIdsRef.current.has(issue.id))
+          ) {
+            detected.push(issue);
           }
         }
 
