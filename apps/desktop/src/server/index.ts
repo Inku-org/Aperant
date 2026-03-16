@@ -451,8 +451,9 @@ async function main(): Promise<void> {
     });
   });
 
-  // Serve the built SPA. In production the renderer output lives next to us.
-  const staticDir = path.join(__dirname, "..", "renderer");
+  // Serve the built SPA from dist/renderer.
+  // When running via tsx from src/server/, __dirname is src/server/ so we resolve relative to appRoot.
+  const staticDir = path.join(appRoot, "dist", "renderer");
   if (existsSync(staticDir)) {
     app.use(express.static(staticDir));
 
