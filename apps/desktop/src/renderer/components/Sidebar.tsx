@@ -232,9 +232,14 @@ export function Sidebar({
   // Track the last loaded project ID to avoid redundant loads
   const lastLoadedProjectIdRef = useRef<string | null>(null);
 
+  // Detect web build target
+  const isWebBuild =
+    typeof (window as any).BUILD_TARGET === "string" &&
+    (window as any).BUILD_TARGET === "web";
+
   // Compute visible nav items based on GitHub/GitLab enabled state from store
   const visibleNavItems = useMemo(() => {
-    const items = [...baseNavItems];
+    let items = [...baseNavItems];
 
     if (githubEnabled) {
       items.push(...githubNavItems);
@@ -248,8 +253,19 @@ export function Sidebar({
       items.push(...linearNavItems);
     }
 
+    // Hide Electron-only features in web build
+    if (isWebBuild) {
+      const webExcludedViews = new Set([
+        "terminals",
+        "insights",
+        "roadmap",
+        "ideation",
+      ]);
+      items = items.filter((item) => !webExcludedViews.has(item.id));
+    }
+
     return items;
-  }, [githubEnabled, gitlabEnabled, linearEnabled]);
+  }, [githubEnabled, gitlabEnabled, linearEnabled, isWebBuild]);
 
   // Load envConfig when project changes to ensure store is populated
   useEffect(() => {
