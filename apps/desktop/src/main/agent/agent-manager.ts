@@ -517,6 +517,8 @@ export class AgentManager extends EventEmitter {
         context7Enabled: true,
         memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
         linearEnabled: !!process.env.LINEAR_API_KEY,
+        slackEnabled: !!process.env.SLACK_BOT_TOKEN,
+        slackAskEnabled: !!process.env.SLACK_BOT_TOKEN,
       },
       toolContext: {
         cwd: projectPath,
@@ -695,6 +697,8 @@ export class AgentManager extends EventEmitter {
         context7Enabled: true,
         memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
         linearEnabled: !!process.env.LINEAR_API_KEY,
+        slackEnabled: !!process.env.SLACK_BOT_TOKEN,
+        slackAskEnabled: !!process.env.SLACK_BOT_TOKEN,
       },
       toolContext: {
         cwd: effectiveCwd,
@@ -845,6 +849,8 @@ export class AgentManager extends EventEmitter {
         context7Enabled: true,
         memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
         linearEnabled: !!process.env.LINEAR_API_KEY,
+        slackEnabled: !!process.env.SLACK_BOT_TOKEN,
+        slackAskEnabled: !!process.env.SLACK_BOT_TOKEN,
       },
       toolContext: {
         cwd: effectiveCwd,

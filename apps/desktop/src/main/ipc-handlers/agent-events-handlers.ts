@@ -14,12 +14,21 @@ import type { ProcessType, ExecutionProgressData } from "../agent";
 import { titleGenerator } from "../title-generator";
 import { fileWatcher } from "../file-watcher";
 import { notificationService } from "../notification-service";
+import { slackService } from "../slack-service";
+import type { SlackAgentStartPayload } from "../slack-service";
 import { persistPlanLastEventSync, getPlanPath, persistPlanPhaseSync, persistPlanStatusAndReasonSync, hasPlanWithSubtasks, syncPlanPhasesToMainSync } from "./task/plan-file-utils";
 import { findTaskWorktree } from "../worktree-paths";
 import { findTaskAndProject } from "./task/shared";
-import { safeSendToRenderer } from "./utils";
+import { safeSendToRenderer, parseEnvFile } from "./utils";
+import { projectStore } from "../project-store";
 import { getClaudeProfileManager } from "../claude-profile-manager";
 import { taskStateManager } from "../task-state-manager";
+
+// Track which tasks have already sent a Slack start notification
+const slackNotifiedTasks = new Set<string>();
+
+// Notable task events worth posting to Slack
+const SLACK_EVENTS = new Set(['PLANNING_COMPLETE', 'QA_STARTED', 'QA_PASSED', 'QA_FAILED']);
 
 // Timeout for fallback safety net to check if task is still stuck after process exit
 const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
@@ -245,6 +254,20 @@ export function registerAgenteventsHandlers(
     } else {
       notificationService.notifyTaskFailed(taskTitle, project.id, taskId);
     }
+
+    // Slack completion notification
+    if (code === 0) {
+      slackService.postCompletion(taskId, true, `Task "${taskTitle}" completed successfully`).catch(err => {
+        console.warn('[agent-events-handlers] Failed to post Slack completion:', err);
+      });
+    } else {
+      slackService.postCompletion(taskId, false, `Task "${taskTitle}" failed (exit code ${code})`).catch(err => {
+        console.warn('[agent-events-handlers] Failed to post Slack failure:', err);
+      });
+    }
+
+    // Clean up Slack tracking for this task
+    slackNotifiedTasks.delete(taskId);
   });
 
   agentManager.on("task-event", (taskId: string, event, projectId?: string) => {
@@ -300,6 +323,13 @@ export function registerAgenteventsHandlers(
       if (existsSync(worktreePlanPath)) {
         persistPlanLastEventSync(worktreePlanPath, event);
       }
+    }
+
+    // Slack status update for notable events
+    if (SLACK_EVENTS.has(event.type)) {
+      slackService.postStatusUpdate(taskId, `Phase: ${event.type}`).catch(err => {
+        console.warn('[agent-events-handlers] Failed to post Slack status update:', err);
+      });
     }
   });
 
@@ -378,6 +408,14 @@ export function registerAgenteventsHandlers(
       progress,
       taskProjectId
     );
+
+    // Slack start notification on first progress event per task
+    if (!slackNotifiedTasks.has(taskId) && progress.phase) {
+      slackNotifiedTasks.add(taskId);
+      sendSlackStartNotification(taskId, taskProjectId).catch(err => {
+        console.warn('[agent-events-handlers] Failed to send Slack start notification:', err);
+      });
+    }
   });
 
   // ============================================
@@ -459,4 +497,64 @@ export function cancelFallbackTimer(taskId: string): void {
     fallbackTimers.delete(taskId);
     console.debug(`[agent-events-handlers] Cancelled fallback timer for task ${taskId}`);
   }
+}
+
+/**
+ * Send Slack start notification for a task.
+ * Reads env config, lazy-connects SlackService, and posts the agent-started message.
+ */
+async function sendSlackStartNotification(taskId: string, projectId?: string): Promise<void> {
+  const { task, project } = findTaskAndProject(taskId, projectId);
+  if (!task || !project) return;
+
+  // Read .env file for Slack config
+  const envPath = path.join(project.path, project.autoBuildPath, '.env');
+  if (!existsSync(envPath)) return;
+
+  let envVars: Record<string, string>;
+  try {
+    const content = readFileSync(envPath, 'utf-8');
+    envVars = parseEnvFile(content);
+  } catch {
+    return;
+  }
+
+  const slackEnabled = envVars['SLACK_ENABLED'] === 'true';
+  if (!slackEnabled) return;
+
+  const slackNotifyOnStart = envVars['SLACK_NOTIFY_ON_START'] !== 'false'; // default true
+  if (!slackNotifyOnStart) return;
+
+  const botToken = envVars['SLACK_BOT_TOKEN'];
+  const appToken = envVars['SLACK_APP_TOKEN'];
+  const channelId = envVars['SLACK_CHANNEL_ID'];
+
+  if (!botToken || !appToken || !channelId) {
+    console.warn('[agent-events-handlers] Slack enabled but missing token/channel config');
+    return;
+  }
+
+  // Lazy-connect if needed
+  if (!slackService.isConnected()) {
+    try {
+      await slackService.connect(botToken, appToken, channelId);
+    } catch (err) {
+      console.warn('[agent-events-handlers] Failed to connect SlackService:', err);
+      return;
+    }
+  }
+
+  // Build payload from task metadata
+  const metadata = task.metadata;
+  const payload: SlackAgentStartPayload = {
+    taskTitle: task.title || task.specId,
+    taskDescription: task.description,
+    linearIdentifier: metadata?.linearIdentifier,
+    linearUrl: metadata?.linearUrl,
+    complexity: metadata?.complexity,
+    affectedFiles: metadata?.affectedFiles,
+    projectName: project.name,
+  };
+
+  await slackService.postAgentStarted(taskId, payload);
 }

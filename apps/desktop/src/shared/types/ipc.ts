@@ -1136,6 +1136,16 @@ export interface ElectronAPI {
     callback: (projectId: string, error: string) => void,
   ) => () => void;
 
+  // Slack integration operations
+  checkSlackConnection: (
+    botToken: string,
+    channelId: string,
+  ) => Promise<IPCResult<{ teamName: string; channelName: string }>>;
+  sendSlackTestMessage: (
+    botToken: string,
+    channelId: string,
+  ) => Promise<IPCResult>;
+
   // Release operations
   getReleaseableVersions: (
     projectId: string,

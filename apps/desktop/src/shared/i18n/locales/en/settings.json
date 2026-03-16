@@ -394,6 +394,10 @@
       "integrationDescription": "Connect to GitLab for issue tracking",
       "syncDescription": "Sync with GitLab Issues"
     },
+    "slack": {
+      "title": "Slack",
+      "description": "Slack notifications"
+    },
     "memory": {
       "title": "Memory",
       "description": "Graphiti memory backend",
@@ -1184,5 +1188,30 @@
         "description": "An error occurred while saving your provider configuration."
       }
     }
+  },
+  "slack": {
+    "title": "Slack Integration",
+    "description": "Post agent notifications and questions to Slack",
+    "enable": "Enable Slack Notifications",
+    "enableDescription": "Post agent status updates and questions to a Slack channel",
+    "botToken": "Bot Token",
+    "botTokenDescription": "Bot User OAuth Token from your Slack App settings",
+    "appToken": "App-Level Token",
+    "appTokenDescription": "Token with connections:write scope for Socket Mode",
+    "channelId": "Channel ID",
+    "channelIdDescription": "Right-click a channel in Slack to copy the Channel ID",
+    "connectionStatus": "Connection Status",
+    "checking": "Checking...",
+    "connected": "Connected to {{team}} #{{channel}}",
+    "notConnected": "Not connected",
+    "sendTest": "Send Test Message",
+    "testSuccess": "Test message sent!",
+    "testFailed": "Failed to send test message",
+    "notifications": "Notification Settings",
+    "notifyOnStart": "Notify on agent start",
+    "notifyOnComplete": "Notify on completion",
+    "notifyOnFailure": "Notify on failure",
+    "askEnabled": "Allow Agent Questions",
+    "askEnabledDescription": "Agents can ask questions via Slack thread and wait for human replies"
   }
 }

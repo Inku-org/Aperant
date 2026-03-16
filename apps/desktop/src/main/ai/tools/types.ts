@@ -31,6 +31,8 @@ export interface ToolContext {
   abortSignal?: AbortSignal;
   /** If set, Write/Edit tools can only write within these directories */
   allowedWritePaths?: string[];
+  /** Callback to ask a question via Slack and await human reply (injected when Slack is enabled) */
+  askSlack?: (question: string, timeoutMs?: number) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------

@@ -364,6 +364,16 @@ export interface ProjectEnvConfig {
 
   // Custom MCP servers defined by the user
   customMcpServers?: CustomMcpServer[];
+
+  // Slack Integration
+  slackEnabled: boolean;
+  slackBotToken?: string;        // xoxb-...
+  slackAppToken?: string;        // xapp-... (Socket Mode)
+  slackChannelId?: string;       // Channel to post to
+  slackNotifyOnStart?: boolean;  // default: true
+  slackNotifyOnComplete?: boolean; // default: true
+  slackNotifyOnFailure?: boolean;  // default: true
+  slackAskEnabled?: boolean;     // Allow agent questions via Slack (default: true)
 }
 
 /**

@@ -262,7 +262,7 @@ export const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
   // Note: "linear" is conditional on project setting "update_linear_with_tasks"
   // ═══════════════════════════════════════════════════════════════════════
   planner: {
-    tools: [...ALL_BUILTIN_TOOLS],
+    tools: [...ALL_BUILTIN_TOOLS, 'AskSlack'],
     mcpServers: ['context7', 'memory', 'auto-claude'],
     mcpServersOptional: ['linear'],
     autoClaudeTools: [
@@ -273,7 +273,7 @@ export const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
     thinkingDefault: 'high',
   },
   coder: {
-    tools: [...ALL_BUILTIN_TOOLS],
+    tools: [...ALL_BUILTIN_TOOLS, 'AskSlack'],
     mcpServers: ['context7', 'memory', 'auto-claude'],
     mcpServersOptional: ['linear'],
     autoClaudeTools: [
@@ -290,7 +290,7 @@ export const AGENT_CONFIGS: Record<AgentType, AgentConfig> = {
   // QA PHASES (Read + test + browser + memory)
   // ═══════════════════════════════════════════════════════════════════════
   qa_reviewer: {
-    tools: [...ALL_BUILTIN_TOOLS],
+    tools: [...ALL_BUILTIN_TOOLS, 'AskSlack'],
     mcpServers: ['context7', 'memory', 'auto-claude', 'browser'],
     mcpServersOptional: ['linear'],
     autoClaudeTools: [

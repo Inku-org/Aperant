@@ -27,6 +27,7 @@ import {
   SelectValue
 } from '../ui/select';
 import type { ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus, Project, ProjectSettings as ProjectSettingsType } from '../../../shared/types';
+import { SlackIntegrationSection } from './SlackIntegrationSection';
 
 interface IntegrationSettingsProps {
   envConfig: ProjectEnvConfig | null;
@@ -512,6 +513,16 @@ export function IntegrationSettings({
           </div>
         )}
       </section>
+
+      <Separator />
+
+      {/* Slack Integration Section */}
+      {envConfig && (
+        <SlackIntegrationSection
+          envConfig={envConfig}
+          updateEnvConfig={updateEnvConfig}
+        />
+      )}
     </>
   );
 }

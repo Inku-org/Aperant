@@ -74,6 +74,8 @@ export interface SerializableSessionConfig {
     };
     agentMcpAdd?: string;
     agentMcpRemove?: string;
+    slackEnabled?: boolean;
+    slackAskEnabled?: boolean;
   };
   /** Enable agentic orchestration mode where the AI drives the pipeline via SpawnSubagent tool */
   useAgenticOrchestration?: boolean;
@@ -101,7 +103,15 @@ export type WorkerMessage =
   | WorkerProgressMessage
   | WorkerStreamEventMessage
   | WorkerResultMessage
-  | WorkerTaskEventMessage;
+  | WorkerTaskEventMessage
+  | WorkerSlackAskMessage;
+
+export interface WorkerSlackAskMessage {
+  type: 'slack-ask';
+  taskId: string;
+  projectId?: string;
+  data: { questionId: string; question: string; timeoutMs?: number };
+}
 
 export interface WorkerLogMessage {
   type: 'log';
@@ -151,7 +161,8 @@ export interface WorkerTaskEventMessage {
 
 /** Messages sent from main thread to worker */
 export type MainToWorkerMessage =
-  | { type: 'abort' };
+  | { type: 'abort' }
+  | { type: 'slack-reply'; questionId: string; reply: string; error?: string };
 
 // =============================================================================
 // Serialized Security Profile

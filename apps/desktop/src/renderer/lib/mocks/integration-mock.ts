@@ -12,6 +12,7 @@ export const integrationMock = {
       gitlabEnabled: false,
       memoryEnabled: false,
       enableFancyUi: true,
+      slackEnabled: false,
     },
   }),
 
@@ -412,4 +413,15 @@ export const integrationMock = {
 
   // OAuth device code event listener (for streaming device code during auth)
   onGitHubAuthDeviceCode: () => () => {},
+
+  // Slack Integration Operations
+  checkSlackConnection: async () => ({
+    success: false,
+    error: "Not available in browser mock",
+  }),
+
+  sendSlackTestMessage: async () => ({
+    success: false,
+    error: "Not available in browser mock",
+  }),
 };

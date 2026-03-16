@@ -42,6 +42,7 @@
     "jsdom": "^27.4.0"
   },
   "dependencies": {
+    "@lydell/node-pty-darwin-arm64": "^1.1.0",
     "lucide-react": "^0.562.0"
   },
   "overrides": {
