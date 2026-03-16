@@ -1,4 +1,4 @@
-import type { WebSocket } from 'ws';
+import type { WebSocket } from "ws";
 
 interface FakeEvent {
   sender: { send: (...args: unknown[]) => void };
@@ -15,7 +15,9 @@ export interface IpcCompat {
     removeHandler: (channel: string) => void;
   };
   /** Creates a fake getMainWindow that returns a webContents stub */
-  getMainWindow: () => { webContents: { send: (channel: string, ...args: unknown[]) => void } } | null;
+  getMainWindow: () => {
+    webContents: { send: (channel: string, ...args: unknown[]) => void };
+  } | null;
   /** Dispatch an invoke-style call (request-response) */
   dispatch: (channel: string, args: unknown[]) => Promise<unknown>;
   /** Dispatch a send-style call (fire-and-forget) */
@@ -37,7 +39,7 @@ export function createIpcCompat(): IpcCompat {
   };
 
   function broadcast(channel: string, ...args: unknown[]): void {
-    const message = JSON.stringify({ type: 'event', channel, args });
+    const message = JSON.stringify({ type: "event", channel, args });
     for (const client of clients) {
       try {
         client.send(message);
@@ -62,7 +64,11 @@ export function createIpcCompat(): IpcCompat {
 
     getMainWindow() {
       return {
-        webContents: { send: broadcast },
+        isDestroyed: () => false,
+        webContents: {
+          send: broadcast,
+          isDestroyed: () => false,
+        },
       };
     },
 

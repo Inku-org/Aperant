@@ -10,22 +10,34 @@ export interface WebBridge {
 }
 
 export function createWebBridge(ws: WebSocket): WebBridge {
-  const pendingRequests = new Map<string, {
-    resolve: (value: unknown) => void;
-    reject: (reason: Error) => void;
-  }>();
+  const pendingRequests = new Map<
+    string,
+    {
+      resolve: (value: unknown) => void;
+      reject: (reason: Error) => void;
+    }
+  >();
   const eventListeners = new Map<string, Set<ListenerCallback>>();
 
   // Handle incoming messages from server
   ws.onmessage = (event: MessageEvent) => {
-    let msg: { type: string; id?: string; channel?: string; data?: unknown; error?: string; args?: unknown[] };
+    let msg: {
+      type: string;
+      id?: string;
+      channel?: string;
+      data?: unknown;
+      error?: string;
+      args?: unknown[];
+    };
     try {
-      msg = JSON.parse(typeof event.data === 'string' ? event.data : event.data.toString());
+      msg = JSON.parse(
+        typeof event.data === "string" ? event.data : event.data.toString(),
+      );
     } catch {
       return;
     }
 
-    if (msg.type === 'response' && msg.id) {
+    if (msg.type === "response" && msg.id) {
       const pending = pendingRequests.get(msg.id);
       if (pending) {
         pendingRequests.delete(msg.id);
@@ -35,14 +47,17 @@ export function createWebBridge(ws: WebSocket): WebBridge {
           pending.resolve(msg.data);
         }
       }
-    } else if (msg.type === 'event' && msg.channel) {
+    } else if (msg.type === "event" && msg.channel) {
       const listeners = eventListeners.get(msg.channel);
       if (listeners) {
         for (const cb of listeners) {
           try {
             cb(...(msg.args ?? []));
           } catch (err) {
-            console.error(`[web-bridge] Error in event listener for ${msg.channel}:`, err);
+            console.error(
+              `[web-bridge] Error in event listener for ${msg.channel}:`,
+              err,
+            );
           }
         }
       }
@@ -52,7 +67,7 @@ export function createWebBridge(ws: WebSocket): WebBridge {
   return {
     invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
       const id = crypto.randomUUID();
-      ws.send(JSON.stringify({ type: 'invoke', id, channel, args }));
+      ws.send(JSON.stringify({ type: "invoke", id, channel, args }));
       return new Promise<T>((resolve, reject) => {
         pendingRequests.set(id, {
           resolve: resolve as (value: unknown) => void,
@@ -69,7 +84,7 @@ export function createWebBridge(ws: WebSocket): WebBridge {
     },
 
     sendIpc(channel: string, ...args: unknown[]): void {
-      ws.send(JSON.stringify({ type: 'send', channel, args }));
+      ws.send(JSON.stringify({ type: "send", channel, args }));
     },
 
     createIpcListener<T extends unknown[]>(
@@ -94,8 +109,13 @@ export function createWebBridge(ws: WebSocket): WebBridge {
  */
 export function initWebBridge(): Promise<WebBridge> {
   return new Promise((resolve, reject) => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    // In dev mode, Vite serves the client on :5173 but the server runs on :3000
+    const host =
+      process.env.NODE_ENV === "development" || window.location.port === "5173"
+        ? `${window.location.hostname}:3000`
+        : window.location.host;
+    const wsUrl = `${protocol}//${host}/ws`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -104,12 +124,12 @@ export function initWebBridge(): Promise<WebBridge> {
     };
 
     ws.onerror = () => {
-      reject(new Error('WebSocket connection failed'));
+      reject(new Error("WebSocket connection failed"));
     };
 
     // Auto-reconnect on close
     ws.onclose = () => {
-      console.warn('[web-bridge] Connection lost. Reconnecting in 2s...');
+      console.warn("[web-bridge] Connection lost. Reconnecting in 2s...");
       setTimeout(() => {
         initWebBridge().catch(console.error);
       }, 2000);

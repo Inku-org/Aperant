@@ -221,12 +221,22 @@ const session = {
 };
 const desktopCapturer = { getSources: () => Promise.resolve([]) };
 
-// ipcMain stub — the real one is swapped in at runtime via CJS cache
-// For ESM imports that land here, provide a basic stub
+// ipcMain — delegate to the real ipcCompat that the server stores on globalThis.
+// The ESM loader hooks run in a separate thread, but the generated MODULE CODE
+// executes in the MAIN thread where globalThis.__electronShim is available.
 const ipcMain = {
-  handle: noop,
-  on: noop,
-  removeHandler: noop,
+  handle: (...args) => {
+    const shim = globalThis.__electronShim;
+    if (shim?.ipcMain?.handle) return shim.ipcMain.handle(...args);
+  },
+  on: (...args) => {
+    const shim = globalThis.__electronShim;
+    if (shim?.ipcMain?.on) return shim.ipcMain.on(...args);
+  },
+  removeHandler: (...args) => {
+    const shim = globalThis.__electronShim;
+    if (shim?.ipcMain?.removeHandler) return shim.ipcMain.removeHandler(...args);
+  },
   removeAllListeners: noop,
 };
 
