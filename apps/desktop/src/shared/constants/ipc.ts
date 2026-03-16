@@ -607,4 +607,8 @@ export const IPC_CHANNELS = {
   QUEUE_PROFILE_SWAPPED: "queue:profileSwapped", // Task switched to different profile
   QUEUE_SESSION_CAPTURED: "queue:sessionCaptured", // Session ID captured from running task
   QUEUE_BLOCKED_NO_PROFILES: "queue:blockedNoProfiles", // All profiles unavailable
+
+  // Slack integration
+  SLACK_CHECK_CONNECTION: "slack:checkConnection",
+  SLACK_TEST_MESSAGE: "slack:testMessage",
 } as const;

@@ -32,6 +32,7 @@ import type {
   MainToWorkerMessage,
   SerializableSessionConfig,
   WorkerTaskEventMessage,
+  WorkerSlackAskMessage,
 } from './types';
 import type { Tool as AITool } from 'ai';
 import type { SessionConfig, StreamEvent, SessionResult } from '../session/types';
@@ -112,11 +113,36 @@ function postTaskEvent(eventType: string, extra?: Record<string, unknown>): void
 
 const abortController = new AbortController();
 
+const pendingSlackReplies = new Map<string, { resolve: (reply: string) => void; reject: (err: Error) => void }>();
+
 parentPort.on('message', (msg: MainToWorkerMessage) => {
   if (msg.type === 'abort') {
     abortController.abort();
+  } else if (msg.type === 'slack-reply') {
+    const pending = pendingSlackReplies.get(msg.questionId);
+    if (pending) {
+      if (msg.error) {
+        pending.reject(new Error(msg.error));
+      } else {
+        pending.resolve(msg.reply);
+      }
+      pendingSlackReplies.delete(msg.questionId);
+    }
   }
 });
+
+function askSlackFromWorker(question: string, timeoutMs?: number): Promise<string> {
+  const questionId = `q-${config.taskId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    pendingSlackReplies.set(questionId, { resolve, reject });
+    parentPort!.postMessage({
+      type: 'slack-ask',
+      taskId: config.taskId,
+      projectId: config.projectId,
+      data: { questionId, question, timeoutMs },
+    } satisfies WorkerSlackAskMessage);
+  });
+}
 
 // =============================================================================
 // Shared Helpers
@@ -155,6 +181,7 @@ function buildToolContext(session: SerializableSessionConfig, securityProfile: S
     specDir: session.toolContext.specDir,
     securityProfile,
     abortSignal: abortController.signal,
+    askSlack: session.mcpOptions?.slackAskEnabled ? askSlackFromWorker : undefined,
   };
 }
 

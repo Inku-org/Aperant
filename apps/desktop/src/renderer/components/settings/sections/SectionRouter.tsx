@@ -6,6 +6,7 @@ import { SecuritySettings } from '../../project-settings/SecuritySettings';
 import { LinearIntegration } from '../integrations/LinearIntegration';
 import { GitHubIntegration } from '../integrations/GitHubIntegration';
 import { GitLabIntegration } from '../integrations/GitLabIntegration';
+import { SlackIntegrationSection } from '../../project-settings/SlackIntegrationSection';
 import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
 
@@ -165,6 +166,27 @@ export function SectionRouter({
               settings={settings}
               setSettings={setSettings}
             />
+          </InitializationGuard>
+        </SettingsSection>
+      );
+
+    case 'slack':
+      return (
+        <SettingsSection
+          title={t('slack.title')}
+          description={t('slack.description')}
+        >
+          <InitializationGuard
+            initialized={!!project.autoBuildPath}
+            title={t('slack.title')}
+            description={t('slack.description')}
+          >
+            {envConfig && (
+              <SlackIntegrationSection
+                envConfig={envConfig}
+                updateEnvConfig={updateEnvConfig}
+              />
+            )}
           </InitializationGuard>
         </SettingsSection>
       );

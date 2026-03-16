@@ -21,10 +21,13 @@ import type { TaskEventPayload } from '../../agent/task-event-schema';
 import type {
   WorkerConfig,
   WorkerMessage,
+  WorkerSlackAskMessage,
+  MainToWorkerMessage,
   AgentExecutorConfig,
 } from './types';
 import type { SessionResult } from '../session/types';
 import { ProgressTracker } from '../session/progress-tracker';
+import { slackService } from '../../slack-service';
 
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -186,6 +189,10 @@ export class WorkerBridge extends EventEmitter {
         this.emitTyped('task-event', message.taskId, message.data as TaskEventPayload, message.projectId);
         break;
 
+      case 'slack-ask':
+        this.handleSlackAsk(message);
+        break;
+
       case 'result':
         this.handleResult(message.taskId, message.data, message.projectId);
         break;
@@ -228,6 +235,34 @@ export class WorkerBridge extends EventEmitter {
     // Emit exit and cleanup
     this.emitTyped('exit', taskId, exitCode, this.processType, projectId);
     this.cleanup();
+  }
+
+  // ===========================================================================
+  // Slack
+  // ===========================================================================
+
+  private async handleSlackAsk(message: WorkerSlackAskMessage): Promise<void> {
+    const { taskId, data } = message;
+    try {
+      const reply = await slackService.askQuestion(
+        taskId,
+        data.questionId,
+        data.question,
+        data.timeoutMs,
+      );
+      this.worker?.postMessage({
+        type: 'slack-reply',
+        questionId: data.questionId,
+        reply,
+      } satisfies MainToWorkerMessage);
+    } catch (err) {
+      this.worker?.postMessage({
+        type: 'slack-reply',
+        questionId: data.questionId,
+        reply: '',
+        error: err instanceof Error ? err.message : String(err),
+      } satisfies MainToWorkerMessage);
+    }
   }
 
   // ===========================================================================

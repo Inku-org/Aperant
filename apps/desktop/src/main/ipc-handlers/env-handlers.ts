@@ -173,6 +173,32 @@ export function registerEnvHandlers(
       });
     }
 
+    // Slack Integration
+    if (config.slackEnabled !== undefined) {
+      existingVars['SLACK_ENABLED'] = config.slackEnabled ? 'true' : 'false';
+    }
+    if (config.slackBotToken !== undefined) {
+      existingVars['SLACK_BOT_TOKEN'] = config.slackBotToken;
+    }
+    if (config.slackAppToken !== undefined) {
+      existingVars['SLACK_APP_TOKEN'] = config.slackAppToken;
+    }
+    if (config.slackChannelId !== undefined) {
+      existingVars['SLACK_CHANNEL_ID'] = config.slackChannelId;
+    }
+    if (config.slackNotifyOnStart !== undefined) {
+      existingVars['SLACK_NOTIFY_ON_START'] = config.slackNotifyOnStart ? 'true' : 'false';
+    }
+    if (config.slackNotifyOnComplete !== undefined) {
+      existingVars['SLACK_NOTIFY_ON_COMPLETE'] = config.slackNotifyOnComplete ? 'true' : 'false';
+    }
+    if (config.slackNotifyOnFailure !== undefined) {
+      existingVars['SLACK_NOTIFY_ON_FAILURE'] = config.slackNotifyOnFailure ? 'true' : 'false';
+    }
+    if (config.slackAskEnabled !== undefined) {
+      existingVars['SLACK_ASK_ENABLED'] = config.slackAskEnabled ? 'true' : 'false';
+    }
+
     // Custom MCP servers (user-defined)
     if (config.customMcpServers !== undefined) {
       if (config.customMcpServers.length > 0) {
@@ -289,6 +315,18 @@ ${existingVars['OLLAMA_EMBEDDING_DIM'] ? `OLLAMA_EMBEDDING_DIM=${existingVars['O
 # LadybugDB Database (embedded - no Docker required)
 ${existingVars['GRAPHITI_DATABASE'] ? `GRAPHITI_DATABASE=${existingVars['GRAPHITI_DATABASE']}` : '# GRAPHITI_DATABASE=auto_claude_memory'}
 ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_DB_PATH']}` : '# GRAPHITI_DB_PATH=~/.auto-claude/memories'}
+
+# =============================================================================
+# SLACK INTEGRATION (OPTIONAL)
+# =============================================================================
+${existingVars['SLACK_ENABLED'] !== undefined ? `SLACK_ENABLED=${existingVars['SLACK_ENABLED']}` : '# SLACK_ENABLED=false'}
+${existingVars['SLACK_BOT_TOKEN'] ? `SLACK_BOT_TOKEN=${existingVars['SLACK_BOT_TOKEN']}` : '# SLACK_BOT_TOKEN=xoxb-...'}
+${existingVars['SLACK_APP_TOKEN'] ? `SLACK_APP_TOKEN=${existingVars['SLACK_APP_TOKEN']}` : '# SLACK_APP_TOKEN=xapp-...'}
+${existingVars['SLACK_CHANNEL_ID'] ? `SLACK_CHANNEL_ID=${existingVars['SLACK_CHANNEL_ID']}` : '# SLACK_CHANNEL_ID='}
+${existingVars['SLACK_NOTIFY_ON_START'] !== undefined ? `SLACK_NOTIFY_ON_START=${existingVars['SLACK_NOTIFY_ON_START']}` : '# SLACK_NOTIFY_ON_START=true'}
+${existingVars['SLACK_NOTIFY_ON_COMPLETE'] !== undefined ? `SLACK_NOTIFY_ON_COMPLETE=${existingVars['SLACK_NOTIFY_ON_COMPLETE']}` : '# SLACK_NOTIFY_ON_COMPLETE=true'}
+${existingVars['SLACK_NOTIFY_ON_FAILURE'] !== undefined ? `SLACK_NOTIFY_ON_FAILURE=${existingVars['SLACK_NOTIFY_ON_FAILURE']}` : '# SLACK_NOTIFY_ON_FAILURE=true'}
+${existingVars['SLACK_ASK_ENABLED'] !== undefined ? `SLACK_ASK_ENABLED=${existingVars['SLACK_ASK_ENABLED']}` : '# SLACK_ASK_ENABLED=true'}
 `;
 
     return content;
@@ -326,7 +364,8 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
         gitlabEnabled: false,
         memoryEnabled: false,
         enableFancyUi: true,
-        openaiKeyIsGlobal: false
+        openaiKeyIsGlobal: false,
+        slackEnabled: false
       };
 
       // Parse project-specific .env if it exists
@@ -384,6 +423,40 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
       }
       if (vars[GITLAB_ENV_KEYS.AUTO_SYNC]?.toLowerCase() === 'true') {
         config.gitlabAutoSync = true;
+      }
+
+      // Slack config
+      if (vars['SLACK_BOT_TOKEN']) {
+        config.slackBotToken = vars['SLACK_BOT_TOKEN'];
+      }
+      if (vars['SLACK_APP_TOKEN']) {
+        config.slackAppToken = vars['SLACK_APP_TOKEN'];
+      }
+      if (vars['SLACK_CHANNEL_ID']) {
+        config.slackChannelId = vars['SLACK_CHANNEL_ID'];
+      }
+      if (vars['SLACK_ENABLED']?.toLowerCase() === 'true' && vars['SLACK_BOT_TOKEN']) {
+        config.slackEnabled = true;
+      }
+      if (vars['SLACK_NOTIFY_ON_START']?.toLowerCase() === 'false') {
+        config.slackNotifyOnStart = false;
+      } else {
+        config.slackNotifyOnStart = true; // default true
+      }
+      if (vars['SLACK_NOTIFY_ON_COMPLETE']?.toLowerCase() === 'false') {
+        config.slackNotifyOnComplete = false;
+      } else {
+        config.slackNotifyOnComplete = true; // default true
+      }
+      if (vars['SLACK_NOTIFY_ON_FAILURE']?.toLowerCase() === 'false') {
+        config.slackNotifyOnFailure = false;
+      } else {
+        config.slackNotifyOnFailure = true; // default true
+      }
+      if (vars['SLACK_ASK_ENABLED']?.toLowerCase() === 'false') {
+        config.slackAskEnabled = false;
+      } else {
+        config.slackAskEnabled = true; // default true
       }
 
       // Git/Worktree config

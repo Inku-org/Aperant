@@ -394,6 +394,10 @@
       "integrationDescription": "Se connecter à GitLab pour le suivi des issues",
       "syncDescription": "Synchroniser avec GitLab Issues"
     },
+    "slack": {
+      "title": "Slack",
+      "description": "Notifications Slack"
+    },
     "memory": {
       "title": "Mémoire",
       "description": "Backend mémoire Graphiti",
@@ -1184,5 +1188,30 @@
         "description": "Une erreur s'est produite lors de l'enregistrement de la configuration du fournisseur."
       }
     }
+  },
+  "slack": {
+    "title": "Intégration Slack",
+    "description": "Publier les notifications et questions des agents sur Slack",
+    "enable": "Activer les notifications Slack",
+    "enableDescription": "Publier les mises à jour de statut et les questions des agents sur un canal Slack",
+    "botToken": "Token Bot",
+    "botTokenDescription": "Token OAuth Bot User depuis les paramètres de votre App Slack",
+    "appToken": "Token de niveau App",
+    "appTokenDescription": "Token avec le scope connections:write pour le mode Socket",
+    "channelId": "ID du canal",
+    "channelIdDescription": "Cliquez droit sur un canal Slack pour copier l'ID du canal",
+    "connectionStatus": "Statut de connexion",
+    "checking": "Vérification...",
+    "connected": "Connecté à {{team}} #{{channel}}",
+    "notConnected": "Non connecté",
+    "sendTest": "Envoyer un message test",
+    "testSuccess": "Message test envoyé !",
+    "testFailed": "Échec de l'envoi du message test",
+    "notifications": "Paramètres de notification",
+    "notifyOnStart": "Notifier au démarrage de l'agent",
+    "notifyOnComplete": "Notifier à la fin",
+    "notifyOnFailure": "Notifier en cas d'échec",
+    "askEnabled": "Autoriser les questions des agents",
+    "askEnabledDescription": "Les agents peuvent poser des questions via un fil Slack et attendre les réponses humaines"
   }
 }
