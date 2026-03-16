@@ -1,5 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import type { LinearIssue, LinearSyncStatus } from "../../../../shared/types";
+import { APERANT_IGNORE_LABEL } from "../../../../shared/constants";
 import type { LinearFilterState } from "../types";
 
 interface LinearIssuesState {
@@ -59,23 +60,32 @@ export function useLinearIssues(projectId: string | undefined) {
     try {
       const result = await window.electronAPI.getLinearIssues(pid);
       if (result.success && result.data) {
-        const issues = result.data as LinearIssue[];
+        const rawIssues = result.data as LinearIssue[];
 
-        // Detect new active issues (not completed/canceled)
+        // Filter out issues with the aperant:ignore label
+        const issues = rawIssues.filter(
+          (issue) =>
+            !issue.labels.some(
+              (l) => l.name.toLowerCase() === APERANT_IGNORE_LABEL,
+            ),
+        );
+
+        // Detect active issues that need investigation.
+        // On first load (knownIssueIdsRef empty): ALL active issues are "new".
+        // On subsequent loads: only issues not previously seen are "new".
         const detected: LinearIssue[] = [];
-        if (knownIssueIdsRef.current.size > 0) {
-          for (const issue of issues) {
-            if (
-              !knownIssueIdsRef.current.has(issue.id) &&
-              issue.state.type !== "completed" &&
-              issue.state.type !== "canceled"
-            ) {
-              detected.push(issue);
-            }
+        const isFirstLoad = knownIssueIdsRef.current.size === 0;
+        for (const issue of issues) {
+          if (
+            issue.state.type !== "completed" &&
+            issue.state.type !== "canceled" &&
+            (isFirstLoad || !knownIssueIdsRef.current.has(issue.id))
+          ) {
+            detected.push(issue);
           }
         }
 
-        // Update known IDs
+        // Update known IDs (uses filtered list so removing the label triggers new-issue detection)
         knownIssueIdsRef.current = new Set(issues.map((i) => i.id));
 
         if (detected.length > 0) {

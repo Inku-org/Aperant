@@ -191,6 +191,7 @@ export function LinearIssues({
                   ? lastInvestigationResult
                   : null
               }
+              investigationStatus={investigationStatus}
               linkedTaskId={issueToTaskMap.get(selectedIssue.id)}
               onViewTask={onNavigateToTask}
               projectId={selectedProject?.id}

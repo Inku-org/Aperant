@@ -37,6 +37,8 @@
     "activeIssues": "tickets actifs",
     "refresh": "Actualiser"
   },
+  "investigating": "Analyse en cours...",
+  "queuedForInvestigation": "En attente d'analyse...",
   "proposedSolution": "Solution proposée",
   "affectedFiles": "Fichiers concernés",
   "impactScore": "Score d'impact",

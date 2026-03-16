@@ -10,24 +10,28 @@
  * cannot distinguish between a Python subprocess and a TS worker thread.
  */
 
-import { Worker } from 'worker_threads';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { EventEmitter } from 'events';
-import { app } from 'electron';
+import { Worker } from "worker_threads";
+import path from "path";
+import { fileURLToPath } from "url";
+import { EventEmitter } from "events";
+import { app } from "electron";
 
-import type { AgentManagerEvents, ExecutionProgressData, ProcessType } from '../../agent/types';
-import type { TaskEventPayload } from '../../agent/task-event-schema';
+import type {
+  AgentManagerEvents,
+  ExecutionProgressData,
+  ProcessType,
+} from "../../agent/types";
+import type { TaskEventPayload } from "../../agent/task-event-schema";
 import type {
   WorkerConfig,
   WorkerMessage,
   WorkerSlackAskMessage,
   MainToWorkerMessage,
   AgentExecutorConfig,
-} from './types';
-import type { SessionResult } from '../session/types';
-import { ProgressTracker } from '../session/progress-tracker';
-import { slackService } from '../../slack-service';
+} from "./types";
+import type { SessionResult } from "../session/types";
+import { ProgressTracker } from "../session/progress-tracker";
+import { slackService } from "../../slack-service";
 
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -44,12 +48,25 @@ const __dirname = path.dirname(__filename);
 function resolveWorkerPath(): string {
   if (app.isPackaged) {
     // Production: worker is inside app.asar at out/main/ai/agent/worker.js
-    return path.join(process.resourcesPath, 'app.asar', 'out', 'main', 'ai', 'agent', 'worker.js');
+    return path.join(
+      process.resourcesPath,
+      "app.asar",
+      "out",
+      "main",
+      "ai",
+      "agent",
+      "worker.js",
+    );
+  }
+  // When running from source via tsx (web server mode), __dirname is already
+  // src/main/ai/agent/ — the worker is a sibling file, not in a subdirectory.
+  if (__filename.endsWith(".ts")) {
+    return path.join(__dirname, "worker.ts");
   }
   // Dev: electron-vite outputs worker at out/main/ai/agent/worker.js
   // because the Rollup input key is 'ai/agent/worker'.
   // __dirname resolves to out/main/ at runtime, so we need the subdirectory.
-  return path.join(__dirname, 'ai', 'agent', 'worker.js');
+  return path.join(__dirname, "ai", "agent", "worker.js");
 }
 
 // =============================================================================
@@ -70,9 +87,9 @@ function resolveWorkerPath(): string {
 export class WorkerBridge extends EventEmitter {
   private worker: Worker | null = null;
   private progressTracker: ProgressTracker = new ProgressTracker();
-  private taskId: string = '';
+  private taskId: string = "";
   private projectId: string | undefined;
-  private processType: ProcessType = 'task-execution';
+  private processType: ProcessType = "task-execution";
 
   /**
    * Spawn a worker thread with the given configuration.
@@ -82,7 +99,9 @@ export class WorkerBridge extends EventEmitter {
    */
   spawn(config: AgentExecutorConfig): void {
     if (this.worker) {
-      throw new Error('WorkerBridge already has an active worker. Call terminate() first.');
+      throw new Error(
+        "WorkerBridge already has an active worker. Call terminate() first.",
+      );
     }
 
     this.taskId = config.taskId;
@@ -98,25 +117,62 @@ export class WorkerBridge extends EventEmitter {
     };
 
     const workerPath = resolveWorkerPath();
+    const isTsx = workerPath.endsWith(".ts");
+
+    // When running from source via tsx, worker threads need:
+    // 1. tsx's --require/--import hooks for TypeScript compilation
+    // 2. A custom loader to resolve extensionless .ts imports (tsx doesn't
+    //    handle this in worker threads on Node 24+)
+    // 3. The electron ESM hooks for `import ... from 'electron'`
+    let tsxExecArgv: string[] | undefined;
+    if (isTsx) {
+      tsxExecArgv = [];
+      for (let i = 0; i < process.execArgv.length; i++) {
+        const arg = process.execArgv[i];
+        if (arg === "--eval" || arg === "-e" || arg === "--input-type") {
+          i++; // skip next arg (the value)
+        } else {
+          tsxExecArgv.push(arg);
+        }
+      }
+      // Add custom .ts extension resolver for worker threads
+      const loaderPath = path.resolve(
+        __dirname,
+        "..",
+        "..",
+        "..",
+        "..",
+        "server",
+        "worker-ts-loader.mjs",
+      );
+      tsxExecArgv.push("--import", `file://${loaderPath}`);
+    }
 
     this.worker = new Worker(workerPath, {
       workerData: workerConfig,
+      ...(tsxExecArgv ? { execArgv: tsxExecArgv } : {}),
     });
 
-    this.worker.on('message', (message: WorkerMessage) => {
+    this.worker.on("message", (message: WorkerMessage) => {
       this.handleWorkerMessage(message);
     });
 
-    this.worker.on('error', (error: Error) => {
-      this.emitTyped('error', this.taskId, error.message, this.projectId);
+    this.worker.on("error", (error: Error) => {
+      this.emitTyped("error", this.taskId, error.message, this.projectId);
       this.cleanup();
     });
 
-    this.worker.on('exit', (code: number) => {
+    this.worker.on("exit", (code: number) => {
       // Code 0 = clean exit; non-zero = crash/error
       // Only emit exit if we haven't already emitted from a 'result' message
       if (this.worker) {
-        this.emitTyped('exit', this.taskId, code === 0 ? 0 : code, this.processType, this.projectId);
+        this.emitTyped(
+          "exit",
+          this.taskId,
+          code === 0 ? 0 : code,
+          this.processType,
+          this.projectId,
+        );
         this.cleanup();
       }
     });
@@ -131,7 +187,7 @@ export class WorkerBridge extends EventEmitter {
 
     // Try graceful abort first
     try {
-      this.worker.postMessage({ type: 'abort' });
+      this.worker.postMessage({ type: "abort" });
     } catch {
       // Worker may already be dead
     }
@@ -163,37 +219,57 @@ export class WorkerBridge extends EventEmitter {
 
   private handleWorkerMessage(message: WorkerMessage): void {
     switch (message.type) {
-      case 'log':
-        this.emitTyped('log', message.taskId, message.data, message.projectId);
+      case "log":
+        this.emitTyped("log", message.taskId, message.data, message.projectId);
         break;
 
-      case 'error':
-        this.emitTyped('error', message.taskId, message.data, message.projectId);
+      case "error":
+        this.emitTyped(
+          "error",
+          message.taskId,
+          message.data,
+          message.projectId,
+        );
         break;
 
-      case 'execution-progress':
-        this.emitTyped('execution-progress', message.taskId, message.data, message.projectId);
+      case "execution-progress":
+        this.emitTyped(
+          "execution-progress",
+          message.taskId,
+          message.data,
+          message.projectId,
+        );
         break;
 
-      case 'stream-event':
+      case "stream-event":
         // Feed the progress tracker and emit progress updates
         this.progressTracker.processEvent(message.data);
         this.emitProgressFromTracker(message.taskId, message.projectId);
         // Also forward raw log for text events
-        if (message.data.type === 'text-delta') {
-          this.emitTyped('log', message.taskId, message.data.text, message.projectId);
+        if (message.data.type === "text-delta") {
+          this.emitTyped(
+            "log",
+            message.taskId,
+            message.data.text,
+            message.projectId,
+          );
         }
         break;
 
-      case 'task-event':
-        this.emitTyped('task-event', message.taskId, message.data as TaskEventPayload, message.projectId);
+      case "task-event":
+        this.emitTyped(
+          "task-event",
+          message.taskId,
+          message.data as TaskEventPayload,
+          message.projectId,
+        );
         break;
 
-      case 'slack-ask':
+      case "slack-ask":
         this.handleSlackAsk(message);
         break;
 
-      case 'result':
+      case "result":
         this.handleResult(message.taskId, message.data, message.projectId);
         break;
     }
@@ -211,29 +287,39 @@ export class WorkerBridge extends EventEmitter {
       overallProgress: 0,
       currentSubtask: state.currentSubtask ?? undefined,
       message: state.currentMessage,
-      completedPhases: state.completedPhases as ExecutionProgressData['completedPhases'],
+      completedPhases:
+        state.completedPhases as ExecutionProgressData["completedPhases"],
     };
-    this.emitTyped('execution-progress', taskId, progressData, projectId);
+    this.emitTyped("execution-progress", taskId, progressData, projectId);
   }
 
   /**
    * Handle the final session result from the worker.
    * Maps SessionResult.outcome to an exit code.
    */
-  private handleResult(taskId: string, result: SessionResult, projectId?: string): void {
+  private handleResult(
+    taskId: string,
+    result: SessionResult,
+    projectId?: string,
+  ): void {
     // Map outcome to exit code
-    const exitCode = result.outcome === 'completed' || result.outcome === 'max_steps' || result.outcome === 'context_window' ? 0 : 1;
+    const exitCode =
+      result.outcome === "completed" ||
+      result.outcome === "max_steps" ||
+      result.outcome === "context_window"
+        ? 0
+        : 1;
 
     // Log the result summary
     const summary = `Session complete: outcome=${result.outcome}, steps=${result.stepsExecuted}, tools=${result.toolCallCount}, duration=${result.durationMs}ms`;
-    this.emitTyped('log', taskId, summary, projectId);
+    this.emitTyped("log", taskId, summary, projectId);
 
     if (result.error) {
-      this.emitTyped('error', taskId, result.error.message, projectId);
+      this.emitTyped("error", taskId, result.error.message, projectId);
     }
 
     // Emit exit and cleanup
-    this.emitTyped('exit', taskId, exitCode, this.processType, projectId);
+    this.emitTyped("exit", taskId, exitCode, this.processType, projectId);
     this.cleanup();
   }
 

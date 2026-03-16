@@ -1,30 +1,46 @@
-import { ipcMain, BrowserWindow } from 'electron';
-import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, TaskStartOptions, TaskStatus, ImageAttachment } from '../../../shared/types';
-import path from 'path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { spawnSync, execFileSync } from 'child_process';
-import { getToolPath } from '../../cli-tool-manager';
-import { AgentManager } from '../../agent';
-import { fileWatcher } from '../../file-watcher';
-import { findTaskAndProject } from './shared';
-import { checkGitStatus } from '../../project-initializer';
-import { initializeClaudeProfileManager, type ClaudeProfileManager } from '../../claude-profile-manager';
-import { taskStateManager } from '../../task-state-manager';
+import { ipcMain, BrowserWindow } from "electron";
+import {
+  IPC_CHANNELS,
+  AUTO_BUILD_PATHS,
+  getSpecsDir,
+} from "../../../shared/constants";
+import type {
+  IPCResult,
+  TaskStartOptions,
+  TaskStatus,
+  ImageAttachment,
+} from "../../../shared/types";
+import path from "path";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { spawnSync, execFileSync } from "child_process";
+import { getToolPath } from "../../cli-tool-manager";
+import { AgentManager } from "../../agent";
+import { fileWatcher } from "../../file-watcher";
+import { findTaskAndProject } from "./shared";
+import { checkGitStatus } from "../../project-initializer";
+import {
+  initializeClaudeProfileManager,
+  type ClaudeProfileManager,
+} from "../../claude-profile-manager";
+import { taskStateManager } from "../../task-state-manager";
 import {
   getPlanPath,
   persistPlanStatus,
   createPlanIfNotExists,
   resetStuckSubtasks,
-  hasPlanWithSubtasks
-} from './plan-file-utils';
-import { writeFileAtomicSync } from '../../utils/atomic-file';
-import { findTaskWorktree } from '../../worktree-paths';
-import { projectStore } from '../../project-store';
-import { getIsolatedGitEnv, detectWorktreeBranch } from '../../utils/git-isolation';
-import { cancelFallbackTimer } from '../agent-events-handlers';
-import { readSettingsFile } from '../../settings-utils';
-import type { ProviderAccount } from '../../../shared/types/provider-account';
+  hasPlanWithSubtasks,
+} from "./plan-file-utils";
+import { writeFileAtomicSync } from "../../utils/atomic-file";
+import { findTaskWorktree } from "../../worktree-paths";
+import { projectStore } from "../../project-store";
+import {
+  getIsolatedGitEnv,
+  detectWorktreeBranch,
+} from "../../utils/git-isolation";
+import { cancelFallbackTimer } from "../agent-events-handlers";
+import { readSettingsFile } from "../../settings-utils";
+import type { ProviderAccount } from "../../../shared/types/provider-account";
+import { syncTaskStatusToLinearInBackground } from "../linear/sync-handlers";
 
 /**
  * Check if any provider account is configured (API key or OAuth).
@@ -32,7 +48,8 @@ import type { ProviderAccount } from '../../../shared/types/provider-account';
  */
 function hasAnyProviderAccount(): boolean {
   const settings = readSettingsFile();
-  const accounts = (settings?.providerAccounts as ProviderAccount[] | undefined) ?? [];
+  const accounts =
+    (settings?.providerAccounts as ProviderAccount[] | undefined) ?? [];
   return accounts.length > 0;
 }
 
@@ -42,10 +59,10 @@ function hasAnyProviderAccount(): boolean {
  */
 function safeReadFileSync(filePath: string): string | null {
   try {
-    return readFileSync(filePath, 'utf-8');
+    return readFileSync(filePath, "utf-8");
   } catch (error) {
     // ENOENT (file not found) is expected, other errors should be logged
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       console.error(`[safeReadFileSync] Error reading ${filePath}:`, error);
     }
     return null;
@@ -61,10 +78,15 @@ function checkSubtasksCompletion(plan: Record<string, unknown> | null): {
   totalCount: number;
   allCompleted: boolean;
 } {
-  const allSubtasks = (plan?.phases as Array<{ subtasks?: Array<{ status: string }> }> | undefined)?.flatMap(phase =>
-    phase.subtasks || []
-  ) || [];
-  const completedCount = allSubtasks.filter(s => s.status === 'completed').length;
+  const allSubtasks =
+    (
+      plan?.phases as
+        | Array<{ subtasks?: Array<{ status: string }> }>
+        | undefined
+    )?.flatMap((phase) => phase.subtasks || []) || [];
+  const completedCount = allSubtasks.filter(
+    (s) => s.status === "completed",
+  ).length;
   const totalCount = allSubtasks.length;
   const allCompleted = totalCount > 0 && completedCount === totalCount;
 
@@ -85,12 +107,15 @@ async function ensureProfileManagerInitialized(): Promise<
     const profileManager = await initializeClaudeProfileManager();
     return { success: true, profileManager };
   } catch (error) {
-    console.error('[ensureProfileManagerInitialized] Failed to initialize:', error);
+    console.error(
+      "[ensureProfileManagerInitialized] Failed to initialize:",
+      error,
+    );
     // Include actual error details for debugging while providing actionable guidance
     const errorMessage = error instanceof Error ? error.message : String(error);
     return {
       success: false,
-      error: `Failed to initialize profile manager. Please check file permissions and disk space. (${errorMessage})`
+      error: `Failed to initialize profile manager. Please check file permissions and disk space. (${errorMessage})`,
     };
   }
 }
@@ -100,11 +125,15 @@ async function ensureProfileManagerInitialized(): Promise<
  * When a task runs in a worktree, implementation_plan.json is written there,
  * not in the main project's spec directory.
  */
-function getSpecDirForWatcher(projectPath: string, specsBaseDir: string, specId: string): string {
+function getSpecDirForWatcher(
+  projectPath: string,
+  specsBaseDir: string,
+  specId: string,
+): string {
   const worktreePath = findTaskWorktree(projectPath, specId);
   if (worktreePath) {
     const worktreeSpecDir = path.join(worktreePath, specsBaseDir, specId);
-    if (existsSync(path.join(worktreeSpecDir, 'implementation_plan.json'))) {
+    if (existsSync(path.join(worktreeSpecDir, "implementation_plan.json"))) {
       return worktreeSpecDir;
     }
   }
@@ -116,7 +145,7 @@ function getSpecDirForWatcher(projectPath: string, specsBaseDir: string, specId:
  */
 export function registerTaskExecutionHandlers(
   agentManager: AgentManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
 ): void {
   /**
    * Start a task
@@ -124,7 +153,7 @@ export function registerTaskExecutionHandlers(
   ipcMain.on(
     IPC_CHANNELS.TASK_START,
     async (_, taskId: string, _options?: TaskStartOptions) => {
-      console.warn('[TASK_START] Received request for taskId:', taskId);
+      console.warn("[TASK_START] Received request for taskId:", taskId);
 
       // Cancel any pending fallback timer from previous process exit
       // This prevents the stale timer from incorrectly stopping the newly restarted task
@@ -132,7 +161,7 @@ export function registerTaskExecutionHandlers(
 
       const mainWindow = getMainWindow();
       if (!mainWindow) {
-        console.warn('[TASK_START] No main window found');
+        console.warn("[TASK_START] No main window found");
         return;
       }
 
@@ -143,7 +172,7 @@ export function registerTaskExecutionHandlers(
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          initResult.error
+          initResult.error,
         );
         return;
       }
@@ -156,53 +185,74 @@ export function registerTaskExecutionHandlers(
       const { task, project: foundProject } = findTaskAndProject(taskId);
 
       if (!task || !foundProject) {
-        console.warn('[TASK_START] Task or project not found for taskId:', taskId);
+        console.warn(
+          "[TASK_START] Task or project not found for taskId:",
+          taskId,
+        );
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          'Task or project not found'
+          "Task or project not found",
         );
         return;
       }
 
       // Use task's own projectId as the authoritative source (prevents wrong-project execution)
-      const project = (task.projectId && task.projectId !== foundProject.id)
-        ? (projectStore.getProject(task.projectId) ?? foundProject)
-        : foundProject;
+      const project =
+        task.projectId && task.projectId !== foundProject.id
+          ? (projectStore.getProject(task.projectId) ?? foundProject)
+          : foundProject;
 
       // Check git status - Auto Claude requires git for worktree-based builds
       const gitStatus = checkGitStatus(project.path);
       if (!gitStatus.isGitRepo) {
-        console.warn('[TASK_START] Project is not a git repository:', project.path);
+        console.warn(
+          "[TASK_START] Project is not a git repository:",
+          project.path,
+        );
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          'Git repository required. Please run "git init" in your project directory. Aperant uses git worktrees for isolated builds.'
+          'Git repository required. Please run "git init" in your project directory. Aperant uses git worktrees for isolated builds.',
         );
         return;
       }
       if (!gitStatus.hasCommits) {
-        console.warn('[TASK_START] Git repository has no commits:', project.path);
+        console.warn(
+          "[TASK_START] Git repository has no commits:",
+          project.path,
+        );
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").'
+          'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").',
         );
         return;
       }
 
       // Check authentication - requires valid legacy profile OR provider account
       if (!profileManager.hasValidAuth() && !hasAnyProviderAccount()) {
-        console.warn('[TASK_START] No valid authentication for active profile or provider accounts');
+        console.warn(
+          "[TASK_START] No valid authentication for active profile or provider accounts",
+        );
         mainWindow.webContents.send(
           IPC_CHANNELS.TASK_ERROR,
           taskId,
-          'Authentication required. Please add an account in Settings > Accounts before starting tasks.'
+          "Authentication required. Please add an account in Settings > Accounts before starting tasks.",
         );
         return;
       }
 
-      console.warn('[TASK_START] Found task:', task.specId, 'status:', task.status, 'reviewReason:', task.reviewReason, 'subtasks:', task.subtasks.length);
+      console.warn(
+        "[TASK_START] Found task:",
+        task.specId,
+        "status:",
+        task.status,
+        "reviewReason:",
+        task.reviewReason,
+        "subtasks:",
+        task.subtasks.length,
+      );
 
       // Clear stale tracking state from any previous execution so that:
       // - terminalEventSeen doesn't suppress future PROCESS_EXITED events
@@ -212,12 +262,11 @@ export function registerTaskExecutionHandlers(
       // Check if implementation_plan.json has valid subtasks BEFORE XState handling.
       // This is more reliable than task.subtasks.length which may not be loaded yet.
       const specsBaseDir = getSpecsDir(project.autoBuildPath);
-      const specDir = path.join(
-        project.path,
-        specsBaseDir,
-        task.specId
+      const specDir = path.join(project.path, specsBaseDir, task.specId);
+      const planFilePath = path.join(
+        specDir,
+        AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN,
       );
-      const planFilePath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
       let planHasSubtasks = false;
       const planContent = safeReadFileSync(planFilePath);
       if (planContent) {
@@ -235,43 +284,115 @@ export function registerTaskExecutionHandlers(
       // - human_review/error: User resuming, send USER_RESUMED
       // - backlog/other: Fresh start, send PLANNING_STARTED
       const currentXState = taskStateManager.getCurrentState(taskId);
-      console.warn('[TASK_START] Current XState:', currentXState, '| Task status:', task.status, task.reviewReason);
+      console.warn(
+        "[TASK_START] Current XState:",
+        currentXState,
+        "| Task status:",
+        task.status,
+        task.reviewReason,
+      );
 
-      if (currentXState === 'plan_review') {
+      if (currentXState === "plan_review") {
         // XState says plan_review - send PLAN_APPROVED
-        console.warn('[TASK_START] XState: plan_review -> coding via PLAN_APPROVED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
-      } else if (currentXState === 'error' && !planHasSubtasks) {
+        console.warn(
+          "[TASK_START] XState: plan_review -> coding via PLAN_APPROVED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLAN_APPROVED" },
+          task,
+          project,
+        );
+      } else if (currentXState === "error" && !planHasSubtasks) {
         // FIX (#1562): Task crashed during planning (no subtasks yet).
         // Uses planHasSubtasks from implementation_plan.json (more reliable than task.subtasks.length).
-        console.warn('[TASK_START] XState: error with no plan subtasks -> planning via PLANNING_STARTED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
-      } else if (currentXState === 'human_review' || currentXState === 'error') {
+        console.warn(
+          "[TASK_START] XState: error with no plan subtasks -> planning via PLANNING_STARTED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLANNING_STARTED" },
+          task,
+          project,
+        );
+      } else if (
+        currentXState === "human_review" ||
+        currentXState === "error"
+      ) {
         // XState says human_review or error - send USER_RESUMED
-        console.warn('[TASK_START] XState:', currentXState, '-> coding via USER_RESUMED');
-        taskStateManager.handleUiEvent(taskId, { type: 'USER_RESUMED' }, task, project);
+        console.warn(
+          "[TASK_START] XState:",
+          currentXState,
+          "-> coding via USER_RESUMED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "USER_RESUMED" },
+          task,
+          project,
+        );
       } else if (currentXState) {
         // XState actor exists but in another state (coding, planning, etc.)
         // This shouldn't happen normally, but handle gracefully
-        console.warn('[TASK_START] XState in unexpected state:', currentXState, '- sending PLANNING_STARTED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
-      } else if (task.status === 'human_review' && task.reviewReason === 'plan_review') {
+        console.warn(
+          "[TASK_START] XState in unexpected state:",
+          currentXState,
+          "- sending PLANNING_STARTED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLANNING_STARTED" },
+          task,
+          project,
+        );
+      } else if (
+        task.status === "human_review" &&
+        task.reviewReason === "plan_review"
+      ) {
         // No XState actor - fallback to task data (e.g., after app restart)
-        console.warn('[TASK_START] No XState actor, task data: plan_review -> coding via PLAN_APPROVED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
-      } else if (task.status === 'error' && !planHasSubtasks) {
+        console.warn(
+          "[TASK_START] No XState actor, task data: plan_review -> coding via PLAN_APPROVED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLAN_APPROVED" },
+          task,
+          project,
+        );
+      } else if (task.status === "error" && !planHasSubtasks) {
         // FIX (#1562): No XState actor, task crashed during planning (no subtasks).
         // Uses planHasSubtasks from implementation_plan.json (more reliable than task.subtasks.length).
-        console.warn('[TASK_START] No XState actor, error with no plan subtasks -> planning via PLANNING_STARTED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
-      } else if (task.status === 'human_review' || task.status === 'error') {
+        console.warn(
+          "[TASK_START] No XState actor, error with no plan subtasks -> planning via PLANNING_STARTED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLANNING_STARTED" },
+          task,
+          project,
+        );
+      } else if (task.status === "human_review" || task.status === "error") {
         // No XState actor - fallback to task data for resuming
-        console.warn('[TASK_START] No XState actor, task data:', task.status, '-> coding via USER_RESUMED');
-        taskStateManager.handleUiEvent(taskId, { type: 'USER_RESUMED' }, task, project);
+        console.warn(
+          "[TASK_START] No XState actor, task data:",
+          task.status,
+          "-> coding via USER_RESUMED",
+        );
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "USER_RESUMED" },
+          task,
+          project,
+        );
       } else {
         // Fresh start - PLANNING_STARTED transitions from backlog to planning
-        console.warn('[TASK_START] Fresh start via PLANNING_STARTED');
-        taskStateManager.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
+        console.warn("[TASK_START] Fresh start via PLANNING_STARTED");
+        taskStateManager.handleUiEvent(
+          taskId,
+          { type: "PLANNING_STARTED" },
+          task,
+          project,
+        );
       }
 
       // Reset any stuck subtasks before starting execution
@@ -279,14 +400,23 @@ export function registerTaskExecutionHandlers(
       const planPath = getPlanPath(project, task);
       const resetResult = await resetStuckSubtasks(planPath, project.id);
       if (resetResult.success && resetResult.resetCount > 0) {
-        console.warn(`[TASK_START] Reset ${resetResult.resetCount} stuck subtask(s) before starting`);
+        console.warn(
+          `[TASK_START] Reset ${resetResult.resetCount} stuck subtask(s) before starting`,
+        );
       }
 
       // Start file watcher for this task
       // Use worktree path if it exists, since the backend writes implementation_plan.json there
-      const watchSpecDir = getSpecDirForWatcher(project.path, specsBaseDir, task.specId);
+      const watchSpecDir = getSpecDirForWatcher(
+        project.path,
+        specsBaseDir,
+        task.specId,
+      );
       fileWatcher.watch(taskId, watchSpecDir).catch((err) => {
-        console.error(`[TASK_START] Failed to watch spec dir for ${taskId}:`, err);
+        console.error(
+          `[TASK_START] Failed to watch spec dir for ${taskId}:`,
+          err,
+        );
       });
 
       // Check if spec.md exists (indicates spec creation was already done or in progress)
@@ -303,45 +433,76 @@ export function registerTaskExecutionHandlers(
       // (run.py) which expects subtasks to exist. Now we check the actual plan file.
       const needsImplementation = hasSpec && !planHasSubtasks;
 
-      console.warn('[TASK_START] hasSpec:', hasSpec, 'planHasSubtasks:', planHasSubtasks, 'needsSpecCreation:', needsSpecCreation, 'needsImplementation:', needsImplementation);
+      console.warn(
+        "[TASK_START] hasSpec:",
+        hasSpec,
+        "planHasSubtasks:",
+        planHasSubtasks,
+        "needsSpecCreation:",
+        needsSpecCreation,
+        "needsImplementation:",
+        needsImplementation,
+      );
 
       // Get base branch: task-level override takes precedence over project settings
-      const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
+      const baseBranch =
+        task.metadata?.baseBranch || project.settings?.mainBranch;
 
       if (needsSpecCreation) {
         // No spec file - need to run spec_runner.py to create the spec
         const taskDescription = task.description || task.title;
-        console.warn('[TASK_START] Starting spec creation for:', task.specId, 'in:', specDir, 'baseBranch:', baseBranch);
+        console.warn(
+          "[TASK_START] Starting spec creation for:",
+          task.specId,
+          "in:",
+          specDir,
+          "baseBranch:",
+          baseBranch,
+        );
 
         // Start spec creation process - pass the existing spec directory
         // so spec_runner uses it instead of creating a new one
         // Also pass baseBranch so worktrees are created from the correct branch
-        agentManager.startSpecCreation(taskId, project.path, taskDescription, specDir, task.metadata, baseBranch, project.id);
+        agentManager.startSpecCreation(
+          taskId,
+          project.path,
+          taskDescription,
+          specDir,
+          task.metadata,
+          baseBranch,
+          project.id,
+        );
       } else if (needsImplementation) {
         // Spec exists but no valid subtasks in implementation plan
         // FIX (#1562): Use startTaskExecution (run.py) which will create the planner
         // agent session to generate the implementation plan. run.py handles the case
         // where implementation_plan.json is missing or has no subtasks - the planner
         // agent will generate the plan before the coder starts.
-        console.warn('[TASK_START] Starting task execution (no valid subtasks in plan) for:', task.specId);
+        console.warn(
+          "[TASK_START] Starting task execution (no valid subtasks in plan) for:",
+          task.specId,
+        );
         agentManager.startTaskExecution(
           taskId,
           project.path,
           task.specId,
           {
-            parallel: false,  // Sequential for planning phase
+            parallel: false, // Sequential for planning phase
             workers: 1,
             baseBranch,
             useWorktree: task.metadata?.useWorktree,
             useLocalBranch: task.metadata?.useLocalBranch,
-            pushNewBranches: task.metadata?.pushNewBranches
+            pushNewBranches: task.metadata?.pushNewBranches,
           },
-          project.id
+          project.id,
         );
       } else {
         // Task has subtasks, start normal execution
         // Note: Parallel execution is handled internally by the agent, not via CLI flags
-        console.warn('[TASK_START] Starting task execution (has subtasks) for:', task.specId);
+        console.warn(
+          "[TASK_START] Starting task execution (has subtasks) for:",
+          task.specId,
+        );
 
         agentManager.startTaskExecution(
           taskId,
@@ -353,12 +514,12 @@ export function registerTaskExecutionHandlers(
             baseBranch,
             useWorktree: task.metadata?.useWorktree,
             useLocalBranch: task.metadata?.useLocalBranch,
-            pushNewBranches: task.metadata?.pushNewBranches
+            pushNewBranches: task.metadata?.pushNewBranches,
           },
-          project.id
+          project.id,
         );
       }
-    }
+    },
   );
 
   /**
@@ -367,7 +528,7 @@ export function registerTaskExecutionHandlers(
   ipcMain.on(IPC_CHANNELS.TASK_STOP, (_, taskId: string) => {
     agentManager.killTask(taskId);
     fileWatcher.unwatch(taskId).catch((err) => {
-      console.error('[TASK_STOP] Failed to unwatch:', err);
+      console.error("[TASK_STOP] Failed to unwatch:", err);
     });
 
     // Find task and project to emit USER_STOPPED with plan context
@@ -380,9 +541,9 @@ export function registerTaskExecutionHandlers(
 
     taskStateManager.handleUiEvent(
       taskId,
-      { type: 'USER_STOPPED', hasPlan },
+      { type: "USER_STOPPED", hasPlan },
       task,
-      project
+      project,
     );
 
     // Clear stale tracking state so a subsequent restart works correctly
@@ -399,26 +560,24 @@ export function registerTaskExecutionHandlers(
       taskId: string,
       approved: boolean,
       feedback?: string,
-      images?: ImageAttachment[]
+      images?: ImageAttachment[],
     ): Promise<IPCResult> => {
       // Find task and project
       const { task, project } = findTaskAndProject(taskId);
 
       if (!task || !project) {
-        return { success: false, error: 'Task not found' };
+        return { success: false, error: "Task not found" };
       }
 
       // Check if dev mode is enabled for this project
       const specsBaseDir = getSpecsDir(project.autoBuildPath);
-      const specDir = path.join(
-        project.path,
-        specsBaseDir,
-        task.specId
-      );
+      const specDir = path.join(project.path, specsBaseDir, task.specId);
 
       // Check if worktree exists - QA needs to run in the worktree where the build happened
       const worktreePath = findTaskWorktree(project.path, task.specId);
-      const worktreeSpecDir = worktreePath ? path.join(worktreePath, specsBaseDir, task.specId) : null;
+      const worktreeSpecDir = worktreePath
+        ? path.join(worktreePath, specsBaseDir, task.specId)
+        : null;
       const hasWorktree = worktreePath !== null;
 
       if (approved) {
@@ -428,72 +587,91 @@ export function registerTaskExecutionHandlers(
           writeFileSync(
             qaReportPath,
             `# QA Review\n\nStatus: APPROVED\n\nReviewed at: ${new Date().toISOString()}\n`,
-            'utf-8'
+            "utf-8",
           );
         } catch (error) {
-          console.error('[TASK_REVIEW] Failed to write QA report:', error);
-          return { success: false, error: 'Failed to write QA report file' };
+          console.error("[TASK_REVIEW] Failed to write QA report:", error);
+          return { success: false, error: "Failed to write QA report file" };
         }
 
         taskStateManager.handleUiEvent(
           taskId,
-          { type: 'MARK_DONE' },
+          { type: "MARK_DONE" },
           task,
-          project
+          project,
         );
       } else {
         // Reset and discard all changes from worktree merge in main
         // The worktree still has all changes, so nothing is lost
         if (hasWorktree) {
           // Step 1: Unstage all changes
-          const resetResult = spawnSync(getToolPath('git'), ['reset', 'HEAD'], {
+          const resetResult = spawnSync(getToolPath("git"), ["reset", "HEAD"], {
             cwd: project.path,
-            encoding: 'utf-8',
-            stdio: 'pipe',
-            env: getIsolatedGitEnv()
+            encoding: "utf-8",
+            stdio: "pipe",
+            env: getIsolatedGitEnv(),
           });
           if (resetResult.status === 0) {
-            console.log('[TASK_REVIEW] Unstaged changes in main');
+            console.log("[TASK_REVIEW] Unstaged changes in main");
           }
 
           // Step 2: Discard all working tree changes (restore to pre-merge state)
-          const checkoutResult = spawnSync(getToolPath('git'), ['checkout', '--', '.'], {
-            cwd: project.path,
-            encoding: 'utf-8',
-            stdio: 'pipe',
-            env: getIsolatedGitEnv()
-          });
+          const checkoutResult = spawnSync(
+            getToolPath("git"),
+            ["checkout", "--", "."],
+            {
+              cwd: project.path,
+              encoding: "utf-8",
+              stdio: "pipe",
+              env: getIsolatedGitEnv(),
+            },
+          );
           if (checkoutResult.status === 0) {
-            console.log('[TASK_REVIEW] Discarded working tree changes in main');
+            console.log("[TASK_REVIEW] Discarded working tree changes in main");
           }
 
           // Step 3: Clean untracked files that came from the merge
           // IMPORTANT: Exclude .auto-claude directory to preserve specs and worktree data
-          const cleanResult = spawnSync(getToolPath('git'), ['clean', '-fd', '-e', '.auto-claude'], {
-            cwd: project.path,
-            encoding: 'utf-8',
-            stdio: 'pipe',
-            env: getIsolatedGitEnv()
-          });
+          const cleanResult = spawnSync(
+            getToolPath("git"),
+            ["clean", "-fd", "-e", ".auto-claude"],
+            {
+              cwd: project.path,
+              encoding: "utf-8",
+              stdio: "pipe",
+              env: getIsolatedGitEnv(),
+            },
+          );
           if (cleanResult.status === 0) {
-            console.log('[TASK_REVIEW] Cleaned untracked files in main (excluding .auto-claude)');
+            console.log(
+              "[TASK_REVIEW] Cleaned untracked files in main (excluding .auto-claude)",
+            );
           }
 
-          console.log('[TASK_REVIEW] Main branch restored to pre-merge state');
+          console.log("[TASK_REVIEW] Main branch restored to pre-merge state");
         }
 
         // Write feedback for QA fixer - write to WORKTREE spec dir if it exists
         // The QA process runs in the worktree where the build and implementation_plan.json are
-        const targetSpecDir = hasWorktree && worktreeSpecDir ? worktreeSpecDir : specDir;
-        const fixRequestPath = path.join(targetSpecDir, 'QA_FIX_REQUEST.md');
+        const targetSpecDir =
+          hasWorktree && worktreeSpecDir ? worktreeSpecDir : specDir;
+        const fixRequestPath = path.join(targetSpecDir, "QA_FIX_REQUEST.md");
 
-        console.warn('[TASK_REVIEW] Writing QA fix request to:', fixRequestPath);
-        console.warn('[TASK_REVIEW] hasWorktree:', hasWorktree, 'worktreePath:', worktreePath);
+        console.warn(
+          "[TASK_REVIEW] Writing QA fix request to:",
+          fixRequestPath,
+        );
+        console.warn(
+          "[TASK_REVIEW] hasWorktree:",
+          hasWorktree,
+          "worktreePath:",
+          worktreePath,
+        );
 
         // Process images if provided
-        let imageReferences = '';
+        let imageReferences = "";
         if (images && images.length > 0) {
-          const imagesDir = path.join(targetSpecDir, 'feedback_images');
+          const imagesDir = path.join(targetSpecDir, "feedback_images");
           try {
             if (!existsSync(imagesDir)) {
               mkdirSync(imagesDir, { recursive: true });
@@ -502,58 +680,100 @@ export function registerTaskExecutionHandlers(
             for (const image of images) {
               try {
                 if (!image.data) {
-                  console.warn('[TASK_REVIEW] Skipping image with no data:', image.filename);
+                  console.warn(
+                    "[TASK_REVIEW] Skipping image with no data:",
+                    image.filename,
+                  );
                   continue;
                 }
                 // Server-side MIME type validation (defense in depth - frontend also validates)
                 // Reject missing mimeType to prevent bypass attacks
-                const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
-                if (!image.mimeType || !ALLOWED_MIME_TYPES.includes(image.mimeType)) {
-                  console.warn('[TASK_REVIEW] Skipping image with missing or disallowed MIME type:', image.mimeType);
+                const ALLOWED_MIME_TYPES = [
+                  "image/png",
+                  "image/jpeg",
+                  "image/jpg",
+                  "image/gif",
+                  "image/webp",
+                  "image/svg+xml",
+                ];
+                if (
+                  !image.mimeType ||
+                  !ALLOWED_MIME_TYPES.includes(image.mimeType)
+                ) {
+                  console.warn(
+                    "[TASK_REVIEW] Skipping image with missing or disallowed MIME type:",
+                    image.mimeType,
+                  );
                   continue;
                 }
                 // Sanitize filename to prevent path traversal attacks
                 const sanitizedFilename = path.basename(image.filename);
-                if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
-                  console.warn('[TASK_REVIEW] Skipping image with invalid filename:', image.filename);
+                if (
+                  !sanitizedFilename ||
+                  sanitizedFilename === "." ||
+                  sanitizedFilename === ".."
+                ) {
+                  console.warn(
+                    "[TASK_REVIEW] Skipping image with invalid filename:",
+                    image.filename,
+                  );
                   continue;
                 }
                 // Remove data URL prefix if present (e.g., "data:image/png;base64," or "data:image/svg+xml;base64,")
-                const base64Data = image.data.replace(/^data:image\/[^;]+;base64,/, '');
-                const imageBuffer = Buffer.from(base64Data, 'base64');
+                const base64Data = image.data.replace(
+                  /^data:image\/[^;]+;base64,/,
+                  "",
+                );
+                const imageBuffer = Buffer.from(base64Data, "base64");
                 const imagePath = path.join(imagesDir, sanitizedFilename);
                 // Verify the resolved path is within the images directory (defense in depth)
                 const resolvedPath = path.resolve(imagePath);
                 const resolvedImagesDir = path.resolve(imagesDir);
                 if (!resolvedPath.startsWith(resolvedImagesDir + path.sep)) {
-                  console.warn('[TASK_REVIEW] Skipping image with path outside target directory:', image.filename);
+                  console.warn(
+                    "[TASK_REVIEW] Skipping image with path outside target directory:",
+                    image.filename,
+                  );
                   continue;
                 }
                 writeFileSync(imagePath, imageBuffer);
                 savedImages.push(`feedback_images/${sanitizedFilename}`);
-                console.log('[TASK_REVIEW] Saved image:', sanitizedFilename);
+                console.log("[TASK_REVIEW] Saved image:", sanitizedFilename);
               } catch (imgError) {
-                console.error('[TASK_REVIEW] Failed to save image:', image.filename, imgError);
+                console.error(
+                  "[TASK_REVIEW] Failed to save image:",
+                  image.filename,
+                  imgError,
+                );
               }
             }
             if (savedImages.length > 0) {
-              imageReferences = '\n\n## Reference Images\n\n' +
-                savedImages.map(imgPath => `![Feedback Image](${imgPath})`).join('\n\n');
+              imageReferences =
+                "\n\n## Reference Images\n\n" +
+                savedImages
+                  .map((imgPath) => `![Feedback Image](${imgPath})`)
+                  .join("\n\n");
             }
           } catch (dirError) {
-            console.error('[TASK_REVIEW] Failed to create images directory:', dirError);
+            console.error(
+              "[TASK_REVIEW] Failed to create images directory:",
+              dirError,
+            );
           }
         }
 
         try {
           writeFileSync(
             fixRequestPath,
-            `# QA Fix Request\n\nStatus: REJECTED\n\n## Feedback\n\n${feedback || 'No feedback provided'}${imageReferences}\n\nCreated at: ${new Date().toISOString()}\n`,
-            'utf-8'
+            `# QA Fix Request\n\nStatus: REJECTED\n\n## Feedback\n\n${feedback || "No feedback provided"}${imageReferences}\n\nCreated at: ${new Date().toISOString()}\n`,
+            "utf-8",
           );
         } catch (error) {
-          console.error('[TASK_REVIEW] Failed to write QA fix request:', error);
-          return { success: false, error: 'Failed to write QA fix request file' };
+          console.error("[TASK_REVIEW] Failed to write QA fix request:", error);
+          return {
+            success: false,
+            error: "Failed to write QA fix request file",
+          };
         }
 
         // Clear stale tracking state before starting new QA process
@@ -562,19 +782,27 @@ export function registerTaskExecutionHandlers(
         // Restart QA process - use worktree path if it exists, otherwise main project
         // The QA process needs to run where the implementation_plan.json with completed subtasks is
         const qaProjectPath = hasWorktree ? worktreePath : project.path;
-        console.warn('[TASK_REVIEW] Starting QA process with projectPath:', qaProjectPath);
-        agentManager.startQAProcess(taskId, qaProjectPath, task.specId, project.id);
+        console.warn(
+          "[TASK_REVIEW] Starting QA process with projectPath:",
+          qaProjectPath,
+        );
+        agentManager.startQAProcess(
+          taskId,
+          qaProjectPath,
+          task.specId,
+          project.id,
+        );
 
         taskStateManager.handleUiEvent(
           taskId,
-          { type: 'USER_RESUMED' },
+          { type: "USER_RESUMED" },
           task,
-          project
+          project,
         );
       }
 
       return { success: true };
-    }
+    },
   );
 
   /**
@@ -588,20 +816,22 @@ export function registerTaskExecutionHandlers(
       _,
       taskId: string,
       status: TaskStatus,
-      options?: { forceCleanup?: boolean; keepWorktree?: boolean }
-    ): Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }> => {
+      options?: { forceCleanup?: boolean; keepWorktree?: boolean },
+    ): Promise<
+      IPCResult & { worktreeExists?: boolean; worktreePath?: string }
+    > => {
       // Find task and project first (needed for worktree check)
       const { task, project } = findTaskAndProject(taskId);
 
       if (!task || !project) {
-        return { success: false, error: 'Task not found' };
+        return { success: false, error: "Task not found" };
       }
 
       // Validate status transition - 'done' can only be set through merge handler
       // UNLESS there's no worktree (limbo state - already merged/discarded or failed)
       // OR forceCleanup is requested (user confirmed they want to delete the worktree)
       // OR keepWorktree is requested (user wants to mark done without deleting worktree)
-      if (status === 'done') {
+      if (status === "done") {
         // Check if worktree exists (task.specId matches worktree folder name)
         const worktreePath = findTaskWorktree(project.path, task.specId);
         const hasWorktree = worktreePath !== null;
@@ -609,102 +839,131 @@ export function registerTaskExecutionHandlers(
         if (hasWorktree) {
           if (options?.keepWorktree) {
             // User explicitly chose to keep worktree - allow marking as done
-            console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
+            console.warn(
+              `[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`,
+            );
           } else if (options?.forceCleanup) {
             // User confirmed cleanup - delete worktree and branch
-            console.warn(`[TASK_UPDATE_STATUS] Cleaning up worktree for task ${taskId} (user confirmed)`);
+            console.warn(
+              `[TASK_UPDATE_STATUS] Cleaning up worktree for task ${taskId} (user confirmed)`,
+            );
             try {
               // Get the branch name before removing the worktree
               // Use shared utility to validate detected branch matches expected pattern
               // This prevents deleting wrong branch when worktree is corrupted/orphaned
-              const { branch, usingFallback: usingFallbackBranch } = detectWorktreeBranch(
-                worktreePath,
-                task.specId,
-                { timeout: 30000, logPrefix: '[TASK_UPDATE_STATUS]' }
-              );
+              const { branch, usingFallback: usingFallbackBranch } =
+                detectWorktreeBranch(worktreePath, task.specId, {
+                  timeout: 30000,
+                  logPrefix: "[TASK_UPDATE_STATUS]",
+                });
 
               // Remove the worktree
-              execFileSync(getToolPath('git'), ['worktree', 'remove', '--force', worktreePath], {
-                cwd: project.path,
-                encoding: 'utf-8',
-                timeout: 30000,
-                env: getIsolatedGitEnv()
-              });
-              console.warn(`[TASK_UPDATE_STATUS] Worktree removed: ${worktreePath}`);
+              execFileSync(
+                getToolPath("git"),
+                ["worktree", "remove", "--force", worktreePath],
+                {
+                  cwd: project.path,
+                  encoding: "utf-8",
+                  timeout: 30000,
+                  env: getIsolatedGitEnv(),
+                },
+              );
+              console.warn(
+                `[TASK_UPDATE_STATUS] Worktree removed: ${worktreePath}`,
+              );
 
               // Delete the branch (ignore errors if branch doesn't exist)
               try {
-                execFileSync(getToolPath('git'), ['branch', '-D', branch], {
+                execFileSync(getToolPath("git"), ["branch", "-D", branch], {
                   cwd: project.path,
-                  encoding: 'utf-8',
+                  encoding: "utf-8",
                   timeout: 30000,
-                  env: getIsolatedGitEnv()
+                  env: getIsolatedGitEnv(),
                 });
                 console.warn(`[TASK_UPDATE_STATUS] Branch deleted: ${branch}`);
               } catch (branchDeleteError) {
                 // Branch may not exist or may be the current branch
                 if (usingFallbackBranch) {
                   // More concerning - fallback pattern didn't match actual branch
-                  console.warn(`[TASK_UPDATE_STATUS] Could not delete branch ${branch} using fallback pattern. Actual branch may still exist and need manual cleanup.`, branchDeleteError);
+                  console.warn(
+                    `[TASK_UPDATE_STATUS] Could not delete branch ${branch} using fallback pattern. Actual branch may still exist and need manual cleanup.`,
+                    branchDeleteError,
+                  );
                 } else {
                   console.warn(
                     `[TASK_UPDATE_STATUS] Could not delete branch ${branch} (may not exist or be checked out elsewhere)`,
-                    branchDeleteError
+                    branchDeleteError,
                   );
                 }
               }
 
-              console.warn(`[TASK_UPDATE_STATUS] Worktree cleanup completed successfully`);
+              console.warn(
+                `[TASK_UPDATE_STATUS] Worktree cleanup completed successfully`,
+              );
             } catch (cleanupError) {
-              console.error(`[TASK_UPDATE_STATUS] Failed to cleanup worktree:`, cleanupError);
+              console.error(
+                `[TASK_UPDATE_STATUS] Failed to cleanup worktree:`,
+                cleanupError,
+              );
               return {
                 success: false,
-                error: `Failed to cleanup worktree: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+                error: `Failed to cleanup worktree: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
               };
             }
           } else {
             // Worktree exists but no forceCleanup - return special response for UI to show confirmation
-            console.warn(`[TASK_UPDATE_STATUS] Worktree exists for task ${taskId}. Requesting user confirmation.`);
+            console.warn(
+              `[TASK_UPDATE_STATUS] Worktree exists for task ${taskId}. Requesting user confirmation.`,
+            );
             return {
               success: false,
               worktreeExists: true,
               worktreePath: worktreePath,
-              error: "A worktree still exists for this task. Would you like to delete it and mark the task as complete?"
+              error:
+                "A worktree still exists for this task. Would you like to delete it and mark the task as complete?",
             };
           }
         } else {
           // No worktree - allow marking as done (limbo state recovery)
-          console.warn(`[TASK_UPDATE_STATUS] Allowing status 'done' for task ${taskId} (no worktree found - limbo state)`);
+          console.warn(
+            `[TASK_UPDATE_STATUS] Allowing status 'done' for task ${taskId} (no worktree found - limbo state)`,
+          );
         }
       }
 
       // Validate status transition - 'human_review' requires actual work to have been done
       // This prevents tasks from being incorrectly marked as ready for review when execution failed
-      if (status === 'human_review') {
+      if (status === "human_review") {
         const specsBaseDirForValidation = getSpecsDir(project.autoBuildPath);
         const specDirForValidation = path.join(
           project.path,
           specsBaseDirForValidation,
-          task.specId
+          task.specId,
         );
-        const specFilePath = path.join(specDirForValidation, AUTO_BUILD_PATHS.SPEC_FILE);
+        const specFilePath = path.join(
+          specDirForValidation,
+          AUTO_BUILD_PATHS.SPEC_FILE,
+        );
 
         // Check if spec.md exists and has meaningful content (at least 100 chars)
         const MIN_SPEC_CONTENT_LENGTH = 100;
-        let specContent = '';
+        let specContent = "";
         try {
           if (existsSync(specFilePath)) {
-            specContent = readFileSync(specFilePath, 'utf-8');
+            specContent = readFileSync(specFilePath, "utf-8");
           }
         } catch {
           // Ignore read errors - treat as empty spec
         }
 
         if (!specContent || specContent.length < MIN_SPEC_CONTENT_LENGTH) {
-          console.warn(`[TASK_UPDATE_STATUS] Blocked attempt to set status 'human_review' for task ${taskId}. No spec has been created yet.`);
+          console.warn(
+            `[TASK_UPDATE_STATUS] Blocked attempt to set status 'human_review' for task ${taskId}. No spec has been created yet.`,
+          );
           return {
             success: false,
-            error: "Cannot move to human review - no spec has been created yet. The task must complete processing before review."
+            error:
+              "Cannot move to human review - no spec has been created yet. The task must complete processing before review.",
           };
         }
       }
@@ -715,10 +974,19 @@ export function registerTaskExecutionHandlers(
       const planPath = getPlanPath(project, task);
 
       try {
-        const handledByMachine = taskStateManager.handleManualStatusChange(taskId, status, task, project);
+        const handledByMachine = taskStateManager.handleManualStatusChange(
+          taskId,
+          status,
+          task,
+          project,
+        );
         if (!handledByMachine) {
           // Use shared utility for thread-safe plan file updates (legacy/manual override)
-          const persisted = await persistPlanStatus(planPath, status, project.id);
+          const persisted = await persistPlanStatus(
+            planPath,
+            status,
+            project.id,
+          );
 
           if (!persisted) {
             // If no implementation plan exists yet, create a basic one
@@ -730,13 +998,16 @@ export function registerTaskExecutionHandlers(
 
         // Auto-stop task when status changes AWAY from 'in_progress' and process IS running
         // This handles the case where user drags a running task back to Planning/backlog
-        if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
-          console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
+        if (status !== "in_progress" && agentManager.isRunning(taskId)) {
+          console.warn(
+            "[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:",
+            taskId,
+          );
           agentManager.killTask(taskId);
         }
 
         // Auto-start task when status changes to 'in_progress' and no process is running
-        if (status === 'in_progress' && !agentManager.isRunning(taskId)) {
+        if (status === "in_progress" && !agentManager.isRunning(taskId)) {
           // Clear stale tracking state before starting a new process
           taskStateManager.prepareForRestart(taskId);
           const mainWindow = getMainWindow();
@@ -744,15 +1015,21 @@ export function registerTaskExecutionHandlers(
           // Check git status before auto-starting
           const gitStatusCheck = checkGitStatus(project.path);
           if (!gitStatusCheck.isGitRepo || !gitStatusCheck.hasCommits) {
-            console.warn('[TASK_UPDATE_STATUS] Git check failed, cannot auto-start task');
+            console.warn(
+              "[TASK_UPDATE_STATUS] Git check failed, cannot auto-start task",
+            );
             if (mainWindow) {
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_ERROR,
                 taskId,
-                gitStatusCheck.error || 'Git repository with commits required to run tasks.'
+                gitStatusCheck.error ||
+                  "Git repository with commits required to run tasks.",
               );
             }
-            return { success: false, error: gitStatusCheck.error || 'Git repository required' };
+            return {
+              success: false,
+              error: gitStatusCheck.error || "Git repository required",
+            };
           }
 
           // Check authentication before auto-starting
@@ -763,25 +1040,27 @@ export function registerTaskExecutionHandlers(
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_ERROR,
                 taskId,
-                initResult.error
+                initResult.error,
               );
             }
             return { success: false, error: initResult.error };
           }
           const profileManager = initResult.profileManager;
           if (!profileManager.hasValidAuth() && !hasAnyProviderAccount()) {
-            console.warn('[TASK_UPDATE_STATUS] No valid authentication for active profile or provider accounts');
+            console.warn(
+              "[TASK_UPDATE_STATUS] No valid authentication for active profile or provider accounts",
+            );
             if (mainWindow) {
               mainWindow.webContents.send(
                 IPC_CHANNELS.TASK_ERROR,
                 taskId,
-                'Authentication required. Please add an account in Settings > Accounts before starting tasks.'
+                "Authentication required. Please add an account in Settings > Accounts before starting tasks.",
               );
             }
-            return { success: false, error: 'Authentication required' };
+            return { success: false, error: "Authentication required" };
           }
 
-          console.warn('[TASK_UPDATE_STATUS] Auto-starting task:', taskId);
+          console.warn("[TASK_UPDATE_STATUS] Auto-starting task:", taskId);
 
           // Cancel any pending fallback timer from previous process exit
           // This prevents the stale timer from incorrectly stopping the newly started task
@@ -791,14 +1070,23 @@ export function registerTaskExecutionHandlers(
           // This handles recovery from previous rate limits or crashes
           const resetResult = await resetStuckSubtasks(planPath, project.id);
           if (resetResult.success && resetResult.resetCount > 0) {
-            console.warn(`[TASK_UPDATE_STATUS] Reset ${resetResult.resetCount} stuck subtask(s) before starting`);
+            console.warn(
+              `[TASK_UPDATE_STATUS] Reset ${resetResult.resetCount} stuck subtask(s) before starting`,
+            );
           }
 
           // Start file watcher for this task
           // Use worktree path if it exists, since the backend writes implementation_plan.json there
-          const watchSpecDir = getSpecDirForWatcher(project.path, specsBaseDir, task.specId);
+          const watchSpecDir = getSpecDirForWatcher(
+            project.path,
+            specsBaseDir,
+            task.specId,
+          );
           fileWatcher.watch(taskId, watchSpecDir).catch((err) => {
-            console.error(`[TASK_UPDATE_STATUS] Failed to watch spec dir for ${taskId}:`, err);
+            console.error(
+              `[TASK_UPDATE_STATUS] Failed to watch spec dir for ${taskId}:`,
+              err,
+            );
           });
 
           // Check if spec.md exists
@@ -806,32 +1094,58 @@ export function registerTaskExecutionHandlers(
           const hasSpec = existsSync(specFilePath);
           const needsSpecCreation = !hasSpec;
           // FIX (#1562): Check actual plan file for subtasks, not just task.subtasks.length
-          const updatePlanFilePath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
+          const updatePlanFilePath = path.join(
+            specDir,
+            AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN,
+          );
           let updatePlanHasSubtasks = false;
           const updatePlanContent = safeReadFileSync(updatePlanFilePath);
           if (updatePlanContent) {
             try {
               const plan = JSON.parse(updatePlanContent);
-              updatePlanHasSubtasks = checkSubtasksCompletion(plan).totalCount > 0;
+              updatePlanHasSubtasks =
+                checkSubtasksCompletion(plan).totalCount > 0;
             } catch {
               // Invalid/corrupt plan file - treat as no subtasks
             }
           }
           const needsImplementation = hasSpec && !updatePlanHasSubtasks;
 
-          console.warn('[TASK_UPDATE_STATUS] hasSpec:', hasSpec, 'needsSpecCreation:', needsSpecCreation, 'needsImplementation:', needsImplementation);
+          console.warn(
+            "[TASK_UPDATE_STATUS] hasSpec:",
+            hasSpec,
+            "needsSpecCreation:",
+            needsSpecCreation,
+            "needsImplementation:",
+            needsImplementation,
+          );
 
           // Get base branch: task-level override takes precedence over project settings
-          const baseBranchForUpdate = task.metadata?.baseBranch || project.settings?.mainBranch;
+          const baseBranchForUpdate =
+            task.metadata?.baseBranch || project.settings?.mainBranch;
 
           if (needsSpecCreation) {
             // No spec file - need to run spec_runner.py to create the spec
             const taskDescription = task.description || task.title;
-            console.warn('[TASK_UPDATE_STATUS] Starting spec creation for:', task.specId);
-            agentManager.startSpecCreation(taskId, project.path, taskDescription, specDir, task.metadata, baseBranchForUpdate, project.id);
+            console.warn(
+              "[TASK_UPDATE_STATUS] Starting spec creation for:",
+              task.specId,
+            );
+            agentManager.startSpecCreation(
+              taskId,
+              project.path,
+              taskDescription,
+              specDir,
+              task.metadata,
+              baseBranchForUpdate,
+              project.id,
+            );
           } else if (needsImplementation) {
             // Spec exists but no subtasks - run run.py to create implementation plan and execute
-            console.warn('[TASK_UPDATE_STATUS] Starting task execution (no subtasks) for:', task.specId);
+            console.warn(
+              "[TASK_UPDATE_STATUS] Starting task execution (no subtasks) for:",
+              task.specId,
+            );
             agentManager.startTaskExecution(
               taskId,
               project.path,
@@ -842,14 +1156,17 @@ export function registerTaskExecutionHandlers(
                 baseBranch: baseBranchForUpdate,
                 useWorktree: task.metadata?.useWorktree,
                 useLocalBranch: task.metadata?.useLocalBranch,
-                pushNewBranches: task.metadata?.pushNewBranches
+                pushNewBranches: task.metadata?.pushNewBranches,
               },
-              project.id
+              project.id,
             );
           } else {
             // Task has subtasks, start normal execution
             // Note: Parallel execution is handled internally by the agent
-            console.warn('[TASK_UPDATE_STATUS] Starting task execution (has subtasks) for:', task.specId);
+            console.warn(
+              "[TASK_UPDATE_STATUS] Starting task execution (has subtasks) for:",
+              task.specId,
+            );
             agentManager.startTaskExecution(
               taskId,
               project.path,
@@ -860,9 +1177,9 @@ export function registerTaskExecutionHandlers(
                 baseBranch: baseBranchForUpdate,
                 useWorktree: task.metadata?.useWorktree,
                 useLocalBranch: task.metadata?.useLocalBranch,
-                pushNewBranches: task.metadata?.pushNewBranches
+                pushNewBranches: task.metadata?.pushNewBranches,
               },
-              project.id
+              project.id,
             );
           }
 
@@ -871,21 +1188,27 @@ export function registerTaskExecutionHandlers(
             mainWindow.webContents.send(
               IPC_CHANNELS.TASK_STATUS_CHANGE,
               taskId,
-              'in_progress',
-              project.id
+              "in_progress",
+              project.id,
             );
           }
         }
 
+        // Sync status to Linear in background (fire-and-forget)
+        syncTaskStatusToLinearInBackground(project.id, task.specId, status);
+
         return { success: true };
       } catch (error) {
-        console.error('Failed to update task status:', error);
+        console.error("Failed to update task status:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to update task status'
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to update task status",
         };
       }
-    }
+    },
   );
 
   /**
@@ -896,7 +1219,7 @@ export function registerTaskExecutionHandlers(
     async (_, taskId: string): Promise<IPCResult<boolean>> => {
       const isRunning = agentManager.isRunning(taskId);
       return { success: true, data: isRunning };
-    }
+    },
   );
 
   /**
@@ -910,60 +1233,73 @@ export function registerTaskExecutionHandlers(
       const { task, project } = findTaskAndProject(taskId);
 
       if (!task || !project) {
-        return { success: false, error: 'Task not found' };
+        return { success: false, error: "Task not found" };
       }
 
       // Get the spec directory - use task.specsPath if available (handles worktree vs main)
       const specsBaseDir = getSpecsDir(project.autoBuildPath);
-      const specDir = task.specsPath || path.join(
-        project.path,
-        specsBaseDir,
-        task.specId
-      );
+      const specDir =
+        task.specsPath || path.join(project.path, specsBaseDir, task.specId);
 
       // Write RESUME file to signal backend to continue
-      const resumeFilePath = path.join(specDir, 'RESUME');
+      const resumeFilePath = path.join(specDir, "RESUME");
 
       try {
         const resumeContent = JSON.stringify({
           resumed_at: new Date().toISOString(),
-          resumed_by: 'user'
+          resumed_by: "user",
         });
         writeFileAtomicSync(resumeFilePath, resumeContent);
-        console.log(`[TASK_RESUME_PAUSED] Wrote RESUME file to: ${resumeFilePath}`);
+        console.log(
+          `[TASK_RESUME_PAUSED] Wrote RESUME file to: ${resumeFilePath}`,
+        );
 
         // Also write to worktree if it exists (backend may be running inside the worktree)
         const worktreePath = findTaskWorktree(project.path, task.specId);
         if (worktreePath) {
-          const worktreeResumeFilePath = path.join(worktreePath, specsBaseDir, task.specId, 'RESUME');
+          const worktreeResumeFilePath = path.join(
+            worktreePath,
+            specsBaseDir,
+            task.specId,
+            "RESUME",
+          );
           try {
             writeFileAtomicSync(worktreeResumeFilePath, resumeContent);
-            console.log(`[TASK_RESUME_PAUSED] Also wrote RESUME file to worktree: ${worktreeResumeFilePath}`);
+            console.log(
+              `[TASK_RESUME_PAUSED] Also wrote RESUME file to worktree: ${worktreeResumeFilePath}`,
+            );
           } catch (worktreeError) {
             // Non-fatal - main spec dir RESUME is sufficient
-            console.warn(`[TASK_RESUME_PAUSED] Could not write to worktree (non-fatal):`, worktreeError);
+            console.warn(
+              `[TASK_RESUME_PAUSED] Could not write to worktree (non-fatal):`,
+              worktreeError,
+            );
           }
         } else if (
-          task.executionProgress?.phase === 'rate_limit_paused' ||
-          task.executionProgress?.phase === 'auth_failure_paused'
+          task.executionProgress?.phase === "rate_limit_paused" ||
+          task.executionProgress?.phase === "auth_failure_paused"
         ) {
           // Warn if worktree not found for a paused task - the backend is likely
           // running inside the worktree and may not see the RESUME file in the main spec dir
           console.warn(
             `[TASK_RESUME_PAUSED] Worktree not found for paused task ${task.specId}. ` +
-            `Backend may not detect the RESUME file if running inside a worktree.`
+              `Backend may not detect the RESUME file if running inside a worktree.`,
           );
         }
 
         return { success: true };
       } catch (error) {
-        console.error('[TASK_RESUME_PAUSED] Failed to write RESUME file:', error);
+        console.error(
+          "[TASK_RESUME_PAUSED] Failed to write RESUME file:",
+          error,
+        );
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to signal resume'
+          error:
+            error instanceof Error ? error.message : "Failed to signal resume",
         };
       }
-    }
+    },
   );
 
   /**
@@ -974,8 +1310,16 @@ export function registerTaskExecutionHandlers(
     async (
       _,
       taskId: string,
-      options?: { targetStatus?: TaskStatus; autoRestart?: boolean }
-    ): Promise<IPCResult<{ taskId: string; recovered: boolean; newStatus: TaskStatus; message: string; autoRestarted?: boolean }>> => {
+      options?: { targetStatus?: TaskStatus; autoRestart?: boolean },
+    ): Promise<
+      IPCResult<{
+        taskId: string;
+        recovered: boolean;
+        newStatus: TaskStatus;
+        message: string;
+        autoRestarted?: boolean;
+      }>
+    > => {
       const targetStatus = options?.targetStatus;
       const autoRestart = options?.autoRestart ?? false;
       // Check if task is actually running
@@ -984,13 +1328,13 @@ export function registerTaskExecutionHandlers(
       if (isActuallyRunning) {
         return {
           success: false,
-          error: 'Task is still running. Stop it first before recovering.',
+          error: "Task is still running. Stop it first before recovering.",
           data: {
             taskId,
             recovered: false,
-            newStatus: 'in_progress' as TaskStatus,
-            message: 'Task is still running'
-          }
+            newStatus: "in_progress" as TaskStatus,
+            message: "Task is still running",
+          },
         };
       }
 
@@ -998,38 +1342,60 @@ export function registerTaskExecutionHandlers(
       const { task, project } = findTaskAndProject(taskId);
 
       if (!task || !project) {
-        return { success: false, error: 'Task not found' };
+        return { success: false, error: "Task not found" };
       }
 
       // Get the spec directory - use task.specsPath if available (handles worktree vs main)
       // This is critical: task might exist in worktree, and getTasks() prefers worktree version.
       // If we write to main project but task is in worktree, the worktree's old status takes precedence on refresh.
-      const specDir = task.specsPath || path.join(
-        project.path,
-        getSpecsDir(project.autoBuildPath),
-        task.specId
-      );
+      const specDir =
+        task.specsPath ||
+        path.join(
+          project.path,
+          getSpecsDir(project.autoBuildPath),
+          task.specId,
+        );
 
       // Update implementation_plan.json
       const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
-      console.log(`[Recovery] Writing to plan file at: ${planPath} (task location: ${task.location || 'main'})`);
+      console.log(
+        `[Recovery] Writing to plan file at: ${planPath} (task location: ${task.location || "main"})`,
+      );
 
       // Also update the OTHER location if task exists in both main and worktree
       // This ensures consistency regardless of which version getTasks() prefers
       const specsBaseDir = getSpecsDir(project.autoBuildPath);
       const mainSpecDir = path.join(project.path, specsBaseDir, task.specId);
       const worktreePath = findTaskWorktree(project.path, task.specId);
-      const worktreeSpecDir = worktreePath ? path.join(worktreePath, specsBaseDir, task.specId) : null;
+      const worktreeSpecDir = worktreePath
+        ? path.join(worktreePath, specsBaseDir, task.specId)
+        : null;
 
       // Collect all plan file paths that need updating
       const planPathsToUpdate: string[] = [planPath];
-      if (mainSpecDir !== specDir && existsSync(path.join(mainSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN))) {
-        planPathsToUpdate.push(path.join(mainSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN));
+      if (
+        mainSpecDir !== specDir &&
+        existsSync(path.join(mainSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN))
+      ) {
+        planPathsToUpdate.push(
+          path.join(mainSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN),
+        );
       }
-      if (worktreeSpecDir && worktreeSpecDir !== specDir && existsSync(path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN))) {
-        planPathsToUpdate.push(path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN));
+      if (
+        worktreeSpecDir &&
+        worktreeSpecDir !== specDir &&
+        existsSync(
+          path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN),
+        )
+      ) {
+        planPathsToUpdate.push(
+          path.join(worktreeSpecDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN),
+        );
       }
-      console.log(`[Recovery] Will update ${planPathsToUpdate.length} plan file(s):`, planPathsToUpdate);
+      console.log(
+        `[Recovery] Will update ${planPathsToUpdate.length} plan file(s):`,
+        planPathsToUpdate,
+      );
 
       try {
         // Read the plan to analyze subtask progress
@@ -1040,30 +1406,35 @@ export function registerTaskExecutionHandlers(
           try {
             plan = JSON.parse(planContent);
           } catch (parseError) {
-            console.error('[Recovery] Failed to parse plan file as JSON:', parseError);
+            console.error(
+              "[Recovery] Failed to parse plan file as JSON:",
+              parseError,
+            );
             return {
               success: false,
-              error: 'Plan file contains invalid JSON. The file may be corrupted.'
+              error:
+                "Plan file contains invalid JSON. The file may be corrupted.",
             };
           }
         }
 
         // Determine the target status intelligently based on subtask progress
         // If targetStatus is explicitly provided, use it; otherwise calculate from subtasks
-        let newStatus: TaskStatus = targetStatus || 'backlog';
+        let newStatus: TaskStatus = targetStatus || "backlog";
 
         if (!targetStatus && plan?.phases && Array.isArray(plan.phases)) {
           // Analyze subtask statuses to determine appropriate recovery status
-          const { completedCount, totalCount, allCompleted } = checkSubtasksCompletion(plan);
+          const { completedCount, totalCount, allCompleted } =
+            checkSubtasksCompletion(plan);
 
           if (totalCount > 0) {
             if (allCompleted) {
               // All subtasks completed - should go to review (ai_review or human_review based on source)
               // For recovery, human_review is safer as it requires manual verification
-              newStatus = 'human_review';
+              newStatus = "human_review";
             } else if (completedCount > 0) {
               // Some subtasks completed, some still pending - task is in progress
-              newStatus = 'in_progress';
+              newStatus = "in_progress";
             }
             // else: no subtasks completed, stay with 'backlog'
           }
@@ -1072,11 +1443,16 @@ export function registerTaskExecutionHandlers(
         if (plan) {
           // Update status
           plan.status = newStatus;
-          plan.planStatus = newStatus === 'done' ? 'completed'
-            : newStatus === 'in_progress' ? 'in_progress'
-            : newStatus === 'ai_review' ? 'review'
-            : newStatus === 'human_review' ? 'review'
-            : 'pending';
+          plan.planStatus =
+            newStatus === "done"
+              ? "completed"
+              : newStatus === "in_progress"
+                ? "in_progress"
+                : newStatus === "ai_review"
+                  ? "review"
+                  : newStatus === "human_review"
+                    ? "review"
+                    : "pending";
           plan.updated_at = new Date().toISOString();
 
           // Sync executionPhase and xstateState with the recovery status.
@@ -1084,12 +1460,12 @@ export function registerTaskExecutionHandlers(
           // priority over xstateState) when loading tasks, causing the Kanban spinner
           // to persist even though the task status has been corrected.
           plan.xstateState = newStatus;
-          if (newStatus === 'human_review' || newStatus === 'done') {
-            plan.executionPhase = 'complete';
-          } else if (newStatus === 'backlog') {
-            plan.executionPhase = 'idle';
-          } else if (newStatus === 'in_progress') {
-            plan.executionPhase = 'coding';
+          if (newStatus === "human_review" || newStatus === "done") {
+            plan.executionPhase = "complete";
+          } else if (newStatus === "backlog") {
+            plan.executionPhase = "idle";
+          } else if (newStatus === "in_progress") {
+            plan.executionPhase = "coding";
           }
 
           // Add recovery note
@@ -1099,13 +1475,15 @@ export function registerTaskExecutionHandlers(
           const { allCompleted } = checkSubtasksCompletion(plan);
 
           if (allCompleted) {
-            console.log('[Recovery] Task is fully complete (all subtasks done), setting to human_review without restart');
+            console.log(
+              "[Recovery] Task is fully complete (all subtasks done), setting to human_review without restart",
+            );
             // Don't reset any subtasks - task is done!
             // Just update status in plan file (project store reads from file, no separate update needed)
-            plan.status = 'human_review';
-            plan.planStatus = 'review';
-            plan.executionPhase = 'complete';
-            plan.xstateState = 'human_review';
+            plan.status = "human_review";
+            plan.planStatus = "review";
+            plan.executionPhase = "complete";
+            plan.xstateState = "human_review";
 
             // Write to ALL plan file locations to ensure consistency
             const planContent = JSON.stringify(plan, null, 2);
@@ -1113,10 +1491,15 @@ export function registerTaskExecutionHandlers(
             for (const pathToUpdate of planPathsToUpdate) {
               try {
                 writeFileAtomicSync(pathToUpdate, planContent);
-                console.log(`[Recovery] Successfully wrote to: ${pathToUpdate}`);
+                console.log(
+                  `[Recovery] Successfully wrote to: ${pathToUpdate}`,
+                );
                 writeSucceededForComplete = true;
               } catch (writeError) {
-                console.error(`[Recovery] Failed to write plan file at ${pathToUpdate}:`, writeError);
+                console.error(
+                  `[Recovery] Failed to write plan file at ${pathToUpdate}:`,
+                  writeError,
+                );
                 // Continue trying other paths
               }
             }
@@ -1124,7 +1507,8 @@ export function registerTaskExecutionHandlers(
             if (!writeSucceededForComplete) {
               return {
                 success: false,
-                error: 'Failed to write plan file during recovery (all locations failed)'
+                error:
+                  "Failed to write plan file during recovery (all locations failed)",
               };
             }
 
@@ -1137,10 +1521,10 @@ export function registerTaskExecutionHandlers(
               data: {
                 taskId,
                 recovered: true,
-                newStatus: 'human_review',
-                message: 'Task is complete and ready for review',
-                autoRestarted: false
-              }
+                newStatus: "human_review",
+                message: "Task is complete and ready for review",
+                autoRestarted: false,
+              },
             };
           }
 
@@ -1152,44 +1536,61 @@ export function registerTaskExecutionHandlers(
           let resetFailedCount = 0;
           for (const pathToUpdate of planPathsToUpdate) {
             try {
-              const resetResult = await resetStuckSubtasks(pathToUpdate, project.id);
+              const resetResult = await resetStuckSubtasks(
+                pathToUpdate,
+                project.id,
+              );
               if (resetResult.success) {
                 resetSucceeded = true;
                 totalResetCount += resetResult.resetCount;
                 if (resetResult.resetCount > 0) {
-                  console.log(`[Recovery] Reset ${resetResult.resetCount} stuck subtask(s) in: ${pathToUpdate}`);
+                  console.log(
+                    `[Recovery] Reset ${resetResult.resetCount} stuck subtask(s) in: ${pathToUpdate}`,
+                  );
                 }
               } else {
                 resetFailedCount++;
               }
             } catch (resetError) {
               resetFailedCount++;
-              console.error(`[Recovery] Failed to reset stuck subtasks at ${pathToUpdate}:`, resetError);
+              console.error(
+                `[Recovery] Failed to reset stuck subtasks at ${pathToUpdate}:`,
+                resetError,
+              );
             }
           }
 
           if (!resetSucceeded) {
             return {
               success: false,
-              error: 'Failed to reset stuck subtasks during recovery'
+              error: "Failed to reset stuck subtasks during recovery",
             };
           }
 
           if (resetFailedCount > 0) {
-            console.warn(`[Recovery] Partial reset: ${totalResetCount} subtask(s) reset, but ${resetFailedCount} location(s) failed`);
+            console.warn(
+              `[Recovery] Partial reset: ${totalResetCount} subtask(s) reset, but ${resetFailedCount} location(s) failed`,
+            );
           }
 
-          console.log(`[Recovery] Total ${totalResetCount} subtask(s) reset across all locations`);
+          console.log(
+            `[Recovery] Total ${totalResetCount} subtask(s) reset across all locations`,
+          );
 
           // Clear attempt_history.json to break infinite recovery loops.
           // Without this, the backend re-reads stuck markers from attempt_history
           // and immediately re-stucks the same subtasks after recovery.
           const specDirsToClean = new Set<string>([specDir]);
           if (mainSpecDir !== specDir) specDirsToClean.add(mainSpecDir);
-          if (worktreeSpecDir && worktreeSpecDir !== specDir) specDirsToClean.add(worktreeSpecDir);
+          if (worktreeSpecDir && worktreeSpecDir !== specDir)
+            specDirsToClean.add(worktreeSpecDir);
 
           for (const dir of specDirsToClean) {
-            const attemptHistoryPath = path.join(dir, 'memory', 'attempt_history.json');
+            const attemptHistoryPath = path.join(
+              dir,
+              "memory",
+              "attempt_history.json",
+            );
             const historyContent = safeReadFileSync(attemptHistoryPath);
             if (!historyContent) continue;
 
@@ -1200,7 +1601,9 @@ export function registerTaskExecutionHandlers(
               const stuckIds = new Set<string>(
                 (history.stuck_subtasks || [])
                   .map((s: { subtask_id?: string }) => s.subtask_id)
-                  .filter((id: string | undefined): id is string => Boolean(id))
+                  .filter((id: string | undefined): id is string =>
+                    Boolean(id),
+                  ),
               );
 
               // Clear stuck_subtasks array
@@ -1210,27 +1613,38 @@ export function registerTaskExecutionHandlers(
               if (history.subtasks && stuckIds.size > 0) {
                 for (const stuckId of stuckIds) {
                   if (history.subtasks[stuckId]) {
-                    history.subtasks[stuckId] = { attempts: [], status: 'pending' };
+                    history.subtasks[stuckId] = {
+                      attempts: [],
+                      status: "pending",
+                    };
                   }
                 }
               }
 
               history.metadata = {
                 ...history.metadata,
-                last_updated: new Date().toISOString()
+                last_updated: new Date().toISOString(),
               };
 
-              writeFileAtomicSync(attemptHistoryPath, JSON.stringify(history, null, 2));
-              console.log(`[Recovery] Cleared attempt_history.json at: ${dir} (reset ${stuckIds.size} stuck entries)`);
+              writeFileAtomicSync(
+                attemptHistoryPath,
+                JSON.stringify(history, null, 2),
+              );
+              console.log(
+                `[Recovery] Cleared attempt_history.json at: ${dir} (reset ${stuckIds.size} stuck entries)`,
+              );
             } catch (historyErr) {
-              console.warn(`[Recovery] Could not parse attempt_history at ${dir}:`, historyErr);
+              console.warn(
+                `[Recovery] Could not parse attempt_history at ${dir}:`,
+                historyErr,
+              );
             }
           }
         }
 
         // Stop file watcher if it was watching this task
         fileWatcher.unwatch(taskId).catch((err) => {
-          console.error('[TASK_RECOVER_STUCK] Failed to unwatch:', err);
+          console.error("[TASK_RECOVER_STUCK] Failed to unwatch:", err);
         });
 
         // Auto-restart the task if requested
@@ -1240,8 +1654,13 @@ export function registerTaskExecutionHandlers(
           taskStateManager.prepareForRestart(taskId);
           // Check git status before auto-restarting
           const gitStatusForRestart = checkGitStatus(project.path);
-          if (!gitStatusForRestart.isGitRepo || !gitStatusForRestart.hasCommits) {
-            console.warn('[Recovery] Git check failed, cannot auto-restart task');
+          if (
+            !gitStatusForRestart.isGitRepo ||
+            !gitStatusForRestart.hasCommits
+          ) {
+            console.warn(
+              "[Recovery] Git check failed, cannot auto-restart task",
+            );
             // Recovery succeeded but we can't restart without git
             return {
               success: true,
@@ -1249,9 +1668,9 @@ export function registerTaskExecutionHandlers(
                 taskId,
                 recovered: true,
                 newStatus,
-                message: `Task recovered but cannot restart: ${gitStatusForRestart.error || 'Git repository with commits required.'}`,
-                autoRestarted: false
-              }
+                message: `Task recovered but cannot restart: ${gitStatusForRestart.error || "Git repository with commits required."}`,
+                autoRestarted: false,
+              },
             };
           }
 
@@ -1267,13 +1686,15 @@ export function registerTaskExecutionHandlers(
                 recovered: true,
                 newStatus,
                 message: `Task recovered but cannot restart: ${initResult.error}`,
-                autoRestarted: false
-              }
+                autoRestarted: false,
+              },
             };
           }
           const profileManager = initResult.profileManager;
           if (!profileManager.hasValidAuth() && !hasAnyProviderAccount()) {
-            console.warn('[Recovery] Auth check failed, cannot auto-restart task');
+            console.warn(
+              "[Recovery] Auth check failed, cannot auto-restart task",
+            );
             // Recovery succeeded but we can't restart without auth
             return {
               success: true,
@@ -1281,9 +1702,10 @@ export function registerTaskExecutionHandlers(
                 taskId,
                 recovered: true,
                 newStatus,
-                message: 'Task recovered but cannot restart: authentication required. Please add an account in Settings > Accounts.',
-                autoRestarted: false
-              }
+                message:
+                  "Task recovered but cannot restart: authentication required. Please add an account in Settings > Accounts.",
+                autoRestarted: false,
+              },
             };
           }
 
@@ -1293,19 +1715,24 @@ export function registerTaskExecutionHandlers(
             cancelFallbackTimer(taskId);
 
             // Set status to in_progress for the restart
-            newStatus = 'in_progress';
+            newStatus = "in_progress";
 
             // Update plan status for restart - write to ALL locations
             if (plan) {
-              plan.status = 'in_progress';
-              plan.planStatus = 'in_progress';
+              plan.status = "in_progress";
+              plan.planStatus = "in_progress";
               const restartPlanContent = JSON.stringify(plan, null, 2);
               for (const pathToUpdate of planPathsToUpdate) {
                 try {
                   writeFileAtomicSync(pathToUpdate, restartPlanContent);
-                  console.log(`[Recovery] Wrote restart status to: ${pathToUpdate}`);
+                  console.log(
+                    `[Recovery] Wrote restart status to: ${pathToUpdate}`,
+                  );
                 } catch (writeError) {
-                  console.error(`[Recovery] Failed to write plan file for restart at ${pathToUpdate}:`, writeError);
+                  console.error(
+                    `[Recovery] Failed to write plan file for restart at ${pathToUpdate}:`,
+                    writeError,
+                  );
                   // Continue with restart attempt even if file write fails
                   // The plan status will be updated by the agent when it starts
                 }
@@ -1319,29 +1746,52 @@ export function registerTaskExecutionHandlers(
             // Start the task execution
             // Start file watcher for this task
             // Use worktree path if it exists, since the backend writes implementation_plan.json there
-            const watchSpecDir = getSpecDirForWatcher(project.path, specsBaseDir, task.specId);
+            const watchSpecDir = getSpecDirForWatcher(
+              project.path,
+              specsBaseDir,
+              task.specId,
+            );
             fileWatcher.watch(taskId, watchSpecDir).catch((err) => {
-              console.error(`[Recovery] Failed to watch spec dir for ${taskId}:`, err);
+              console.error(
+                `[Recovery] Failed to watch spec dir for ${taskId}:`,
+                err,
+              );
             });
 
             // Check if spec.md exists to determine whether to run spec creation or task execution
             // Check main project path for spec file (spec is created before worktree)
             // mainSpecDir is declared earlier in the handler scope
-            const specFilePath = path.join(mainSpecDir, AUTO_BUILD_PATHS.SPEC_FILE);
+            const specFilePath = path.join(
+              mainSpecDir,
+              AUTO_BUILD_PATHS.SPEC_FILE,
+            );
             const hasSpec = existsSync(specFilePath);
             const needsSpecCreation = !hasSpec;
 
             // Get base branch: task-level override takes precedence over project settings
-            const baseBranchForRecovery = task.metadata?.baseBranch || project.settings?.mainBranch;
+            const baseBranchForRecovery =
+              task.metadata?.baseBranch || project.settings?.mainBranch;
 
             if (needsSpecCreation) {
               // No spec file - need to run spec_runner.py to create the spec
               const taskDescription = task.description || task.title;
-              console.warn(`[Recovery] Starting spec creation for: ${task.specId}`);
-              agentManager.startSpecCreation(taskId, project.path, taskDescription, mainSpecDir, task.metadata, baseBranchForRecovery, project.id);
+              console.warn(
+                `[Recovery] Starting spec creation for: ${task.specId}`,
+              );
+              agentManager.startSpecCreation(
+                taskId,
+                project.path,
+                taskDescription,
+                mainSpecDir,
+                task.metadata,
+                baseBranchForRecovery,
+                project.id,
+              );
             } else {
               // Spec exists - run task execution
-              console.warn(`[Recovery] Starting task execution for: ${task.specId}`);
+              console.warn(
+                `[Recovery] Starting task execution for: ${task.specId}`,
+              );
               agentManager.startTaskExecution(
                 taskId,
                 project.path,
@@ -1352,16 +1802,19 @@ export function registerTaskExecutionHandlers(
                   baseBranch: baseBranchForRecovery,
                   useWorktree: task.metadata?.useWorktree,
                   useLocalBranch: task.metadata?.useLocalBranch,
-                  pushNewBranches: task.metadata?.pushNewBranches
+                  pushNewBranches: task.metadata?.pushNewBranches,
                 },
-                project.id
+                project.id,
               );
             }
 
             autoRestarted = true;
             console.warn(`[Recovery] Auto-restarted task ${taskId}`);
           } catch (restartError) {
-            console.error('Failed to auto-restart task after recovery:', restartError);
+            console.error(
+              "Failed to auto-restart task after recovery:",
+              restartError,
+            );
             // Recovery succeeded but restart failed - still report success
           }
         }
@@ -1373,7 +1826,7 @@ export function registerTaskExecutionHandlers(
             IPC_CHANNELS.TASK_STATUS_CHANGE,
             taskId,
             newStatus,
-            project.id
+            project.id,
           );
         }
 
@@ -1384,18 +1837,19 @@ export function registerTaskExecutionHandlers(
             recovered: true,
             newStatus,
             message: autoRestarted
-              ? 'Task recovered and restarted successfully'
+              ? "Task recovered and restarted successfully"
               : `Task recovered successfully and moved to ${newStatus}`,
-            autoRestarted
-          }
+            autoRestarted,
+          },
         };
       } catch (error) {
-        console.error('Failed to recover stuck task:', error);
+        console.error("Failed to recover stuck task:", error);
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Failed to recover task'
+          error:
+            error instanceof Error ? error.message : "Failed to recover task",
         };
       }
-    }
+    },
   );
 }
