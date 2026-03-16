@@ -1,45 +1,49 @@
-import { spawn } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { existsSync, readFileSync } from 'fs';
-import { app } from 'electron';
+import { spawn } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+import { existsSync, readFileSync } from "fs";
+import { app } from "electron";
 
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import { EventEmitter } from 'events';
-import { AgentState } from './agent-state';
-import { AgentEvents } from './agent-events';
-import { ProcessType, ExecutionProgressData } from './types';
-import type { AgentExecutorConfig } from '../ai/agent/types';
-import { WorkerBridge } from '../ai/agent/worker-bridge';
-import type { CompletablePhase } from '../../shared/constants/phase-protocol';
-import { parseTaskEvent } from './task-event-parser';
-import { detectRateLimit, createSDKRateLimitInfo, getBestAvailableProfileEnv, detectAuthFailure } from '../rate-limit-detector';
-import { getAPIProfileEnv } from '../services/profile';
-import { projectStore } from '../project-store';
-import { getClaudeProfileManager } from '../claude-profile-manager';
-import { getOAuthModeClearVars } from './env-utils';
-import { getAugmentedEnv } from '../env-utils';
-import { getToolInfo, getClaudeCliPathForSdk } from '../cli-tool-manager';
-import { killProcessGracefully, isWindows } from '../platform';
-import { debugLog } from '../../shared/utils/debug-logger';
+import { EventEmitter } from "events";
+import { AgentState } from "./agent-state";
+import { AgentEvents } from "./agent-events";
+import type { ProcessType, ExecutionProgressData } from "./types";
+import type { AgentExecutorConfig } from "../ai/agent/types";
+import { WorkerBridge } from "../ai/agent/worker-bridge";
+import type { CompletablePhase } from "../../shared/constants/phase-protocol";
+import { parseTaskEvent } from "./task-event-parser";
+import {
+  detectRateLimit,
+  createSDKRateLimitInfo,
+  getBestAvailableProfileEnv,
+  detectAuthFailure,
+} from "../rate-limit-detector";
+import { getAPIProfileEnv } from "../services/profile";
+import { projectStore } from "../project-store";
+import { getClaudeProfileManager } from "../claude-profile-manager";
+import { getOAuthModeClearVars } from "./env-utils";
+import { getAugmentedEnv } from "../env-utils";
+import { getToolInfo, getClaudeCliPathForSdk } from "../cli-tool-manager";
+import { killProcessGracefully, isWindows } from "../platform";
+import { debugLog } from "../../shared/utils/debug-logger";
 
 /**
  * Type for supported CLI tools
  */
-type CliTool = 'claude' | 'gh' | 'glab';
+type CliTool = "claude" | "gh" | "glab";
 
 /**
  * Mapping of CLI tools to their environment variable names
  * This ensures type safety - tools cannot be mismatched with env vars.
  */
 const CLI_TOOL_ENV_MAP: Readonly<Record<CliTool, string>> = {
-  claude: 'CLAUDE_CLI_PATH',
-  gh: 'GITHUB_CLI_PATH',
-  glab: 'GITLAB_CLI_PATH'
+  claude: "CLAUDE_CLI_PATH",
+  gh: "GITHUB_CLI_PATH",
+  glab: "GITLAB_CLI_PATH",
 } as const;
-
 
 function deriveGitBashPath(gitExePath: string): string | null {
   if (!isWindows()) {
@@ -47,20 +51,20 @@ function deriveGitBashPath(gitExePath: string): string | null {
   }
 
   try {
-    const gitDir = path.dirname(gitExePath);  // e.g., D:\...\Git\mingw64\bin
+    const gitDir = path.dirname(gitExePath); // e.g., D:\...\Git\mingw64\bin
     const gitDirName = path.basename(gitDir).toLowerCase();
 
     // Find Git installation root
     let gitRoot: string;
 
-    if (gitDirName === 'cmd') {
+    if (gitDirName === "cmd") {
       // .../Git/cmd/git.exe -> .../Git
       gitRoot = path.dirname(gitDir);
-    } else if (gitDirName === 'bin') {
+    } else if (gitDirName === "bin") {
       // Could be .../Git/bin/git.exe OR .../Git/mingw64/bin/git.exe
       const parent = path.dirname(gitDir);
       const parentName = path.basename(parent).toLowerCase();
-      if (parentName === 'mingw64' || parentName === 'mingw32') {
+      if (parentName === "mingw64" || parentName === "mingw32") {
         // .../Git/mingw64/bin/git.exe -> .../Git
         gitRoot = path.dirname(parent);
       } else {
@@ -73,24 +77,30 @@ function deriveGitBashPath(gitExePath: string): string | null {
     }
 
     // Bash.exe is in Git/bin/bash.exe
-    const bashPath = path.join(gitRoot, 'bin', 'bash.exe');
+    const bashPath = path.join(gitRoot, "bin", "bash.exe");
 
     if (existsSync(bashPath)) {
-      console.log('[AgentProcess] Derived git-bash path:', bashPath);
+      console.log("[AgentProcess] Derived git-bash path:", bashPath);
       return bashPath;
     }
 
     // Fallback: check one level up if gitRoot didn't work
-    const altBashPath = path.join(path.dirname(gitRoot), 'bin', 'bash.exe');
+    const altBashPath = path.join(path.dirname(gitRoot), "bin", "bash.exe");
     if (existsSync(altBashPath)) {
-      console.log('[AgentProcess] Found git-bash at alternate path:', altBashPath);
+      console.log(
+        "[AgentProcess] Found git-bash at alternate path:",
+        altBashPath,
+      );
       return altBashPath;
     }
 
-    console.warn('[AgentProcess] Could not find bash.exe from git path:', gitExePath);
+    console.warn(
+      "[AgentProcess] Could not find bash.exe from git path:",
+      gitExePath,
+    );
     return null;
   } catch (error) {
-    console.error('[AgentProcess] Error deriving git-bash path:', error);
+    console.error("[AgentProcess] Error deriving git-bash path:", error);
     return null;
   }
 }
@@ -102,7 +112,7 @@ export class AgentProcessManager {
   private state: AgentState;
   private events: AgentEvents;
   private emitter: EventEmitter;
-  private autoBuildSourcePath: string = '';
+  private autoBuildSourcePath: string = "";
 
   constructor(state: AgentState, events: AgentEvents, emitter: EventEmitter) {
     this.state = state;
@@ -138,53 +148,70 @@ export class AgentProcessManager {
       try {
         // For 'claude' tool, use getClaudeCliPathForSdk() which returns null for Windows .cmd files
         // This allows the Claude Agent SDK to use its bundled claude.exe instead
-        if (toolName === 'claude') {
+        if (toolName === "claude") {
           const cliPath = getClaudeCliPathForSdk();
           if (cliPath) {
             env[envVarName] = cliPath;
-            console.log(`[AgentProcess] Setting ${envVarName}:`, cliPath, '(source: cli-tool-manager)');
+            console.log(
+              `[AgentProcess] Setting ${envVarName}:`,
+              cliPath,
+              "(source: cli-tool-manager)",
+            );
           } else {
-            console.log(`[AgentProcess] Claude CLI is .cmd file on Windows, not setting ${envVarName} - SDK will use bundled CLI`);
+            console.log(
+              `[AgentProcess] Claude CLI is .cmd file on Windows, not setting ${envVarName} - SDK will use bundled CLI`,
+            );
           }
         } else {
           // For other tools, use standard detection
           const toolInfo = getToolInfo(toolName);
           if (toolInfo.found && toolInfo.path) {
             env[envVarName] = toolInfo.path;
-            console.log(`[AgentProcess] Setting ${envVarName}:`, toolInfo.path, `(source: ${toolInfo.source})`);
+            console.log(
+              `[AgentProcess] Setting ${envVarName}:`,
+              toolInfo.path,
+              `(source: ${toolInfo.source})`,
+            );
           }
         }
       } catch (error) {
-        console.warn(`[AgentProcess] Failed to detect ${toolName} CLI path:`, error instanceof Error ? error.message : String(error));
+        console.warn(
+          `[AgentProcess] Failed to detect ${toolName} CLI path:`,
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
     return env;
   }
 
   private setupProcessEnvironment(
-    extraEnv: Record<string, string>
+    extraEnv: Record<string, string>,
   ): NodeJS.ProcessEnv {
     // Get best available Claude profile environment (automatically handles rate limits)
     const profileResult = getBestAvailableProfileEnv();
     const profileEnv = profileResult.env;
 
-    debugLog('[AgentProcess:setupEnv] Profile result:', {
+    debugLog("[AgentProcess:setupEnv] Profile result:", {
       profileId: profileResult.profileId,
       hasOAuthToken: !!profileEnv.CLAUDE_CODE_OAUTH_TOKEN,
       hasApiKey: !!profileEnv.ANTHROPIC_API_KEY,
       hasConfigDir: !!profileEnv.CLAUDE_CONFIG_DIR,
-      configDir: profileEnv.CLAUDE_CONFIG_DIR || '(not set)',
-      oauthTokenPrefix: profileEnv.CLAUDE_CODE_OAUTH_TOKEN?.substring(0, 8) || '(not set)',
-      apiKeyPrefix: profileEnv.ANTHROPIC_API_KEY?.substring(0, 8) || '(not set)',
+      configDir: profileEnv.CLAUDE_CONFIG_DIR || "(not set)",
+      oauthTokenPrefix:
+        profileEnv.CLAUDE_CODE_OAUTH_TOKEN?.substring(0, 8) || "(not set)",
+      apiKeyPrefix:
+        profileEnv.ANTHROPIC_API_KEY?.substring(0, 8) || "(not set)",
     });
 
     // Warn if profile lacks CLAUDE_CONFIG_DIR - this means the profile has no configDir
     // and subscription metadata may not propagate correctly to the agent subprocess
     if (!profileEnv.CLAUDE_CONFIG_DIR) {
-      console.warn('[AgentProcess:setupEnv] WARNING: Profile env lacks CLAUDE_CONFIG_DIR - profile may not have a configDir set. Subscription metadata may not reach agent subprocess.');
+      console.warn(
+        "[AgentProcess:setupEnv] WARNING: Profile env lacks CLAUDE_CONFIG_DIR - profile may not have a configDir set. Subscription metadata may not reach agent subprocess.",
+      );
     }
 
-    debugLog('[AgentProcess:setupEnv] extraEnv auth keys:', {
+    debugLog("[AgentProcess:setupEnv] extraEnv auth keys:", {
       hasOAuthToken: !!extraEnv.CLAUDE_CODE_OAUTH_TOKEN,
       hasApiKey: !!extraEnv.ANTHROPIC_API_KEY,
       hasConfigDir: !!extraEnv.CLAUDE_CONFIG_DIR,
@@ -199,23 +226,26 @@ export class AgentProcessManager {
     const gitBashEnv: Record<string, string> = {};
     if (isWindows() && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
       try {
-        const gitInfo = getToolInfo('git');
+        const gitInfo = getToolInfo("git");
         if (gitInfo.found && gitInfo.path) {
           const bashPath = deriveGitBashPath(gitInfo.path);
           if (bashPath) {
-            gitBashEnv['CLAUDE_CODE_GIT_BASH_PATH'] = bashPath;
-            console.log('[AgentProcess] Setting CLAUDE_CODE_GIT_BASH_PATH:', bashPath);
+            gitBashEnv["CLAUDE_CODE_GIT_BASH_PATH"] = bashPath;
+            console.log(
+              "[AgentProcess] Setting CLAUDE_CODE_GIT_BASH_PATH:",
+              bashPath,
+            );
           }
         }
       } catch (error) {
-        console.warn('[AgentProcess] Failed to detect git-bash path:', error);
+        console.warn("[AgentProcess] Failed to detect git-bash path:", error);
       }
     }
 
     // Detect and pass CLI tool paths to Python backend
-    const claudeCliEnv = this.detectAndSetCliPath('claude');
-    const ghCliEnv = this.detectAndSetCliPath('gh');
-    const glabCliEnv = this.detectAndSetCliPath('glab');
+    const claudeCliEnv = this.detectAndSetCliPath("claude");
+    const ghCliEnv = this.detectAndSetCliPath("gh");
+    const glabCliEnv = this.detectAndSetCliPath("glab");
 
     // Profile env is spread last to ensure CLAUDE_CONFIG_DIR and auth vars
     // from the active profile always win over extraEnv or augmentedEnv.
@@ -227,9 +257,9 @@ export class AgentProcessManager {
       ...glabCliEnv,
       ...extraEnv,
       ...profileEnv,
-      PYTHONUNBUFFERED: '1',
-      PYTHONIOENCODING: 'utf-8',
-      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: "1",
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
     } as NodeJS.ProcessEnv;
 
     // When the active profile provides CLAUDE_CONFIG_DIR, clear CLAUDE_CODE_OAUTH_TOKEN
@@ -240,17 +270,20 @@ export class AgentProcessManager {
     // We check profileEnv specifically (not mergedEnv) to avoid clearing the token
     // when CLAUDE_CONFIG_DIR comes from the shell environment rather than the profile.
     if (profileEnv.CLAUDE_CONFIG_DIR) {
-      mergedEnv.CLAUDE_CODE_OAUTH_TOKEN = '';
-      debugLog('[AgentProcess:setupEnv] Profile provides CLAUDE_CONFIG_DIR, cleared CLAUDE_CODE_OAUTH_TOKEN from spawn env');
+      mergedEnv.CLAUDE_CODE_OAUTH_TOKEN = "";
+      debugLog(
+        "[AgentProcess:setupEnv] Profile provides CLAUDE_CONFIG_DIR, cleared CLAUDE_CODE_OAUTH_TOKEN from spawn env",
+      );
     }
 
-    debugLog('[AgentProcess:setupEnv] Final merged env auth state:', {
+    debugLog("[AgentProcess:setupEnv] Final merged env auth state:", {
       hasOAuthToken: !!mergedEnv.CLAUDE_CODE_OAUTH_TOKEN,
       hasApiKey: !!mergedEnv.ANTHROPIC_API_KEY,
       hasConfigDir: !!mergedEnv.CLAUDE_CONFIG_DIR,
-      configDir: mergedEnv.CLAUDE_CONFIG_DIR || '(not set)',
-      oauthTokenPrefix: mergedEnv.CLAUDE_CODE_OAUTH_TOKEN?.substring(0, 8) || '(not set)',
-      apiKeyPrefix: mergedEnv.ANTHROPIC_API_KEY?.substring(0, 8) || '(not set)',
+      configDir: mergedEnv.CLAUDE_CONFIG_DIR || "(not set)",
+      oauthTokenPrefix:
+        mergedEnv.CLAUDE_CODE_OAUTH_TOKEN?.substring(0, 8) || "(not set)",
+      apiKeyPrefix: mergedEnv.ANTHROPIC_API_KEY?.substring(0, 8) || "(not set)",
     });
 
     return mergedEnv;
@@ -259,31 +292,39 @@ export class AgentProcessManager {
   private handleProcessFailure(
     taskId: string,
     allOutput: string,
-    processType: ProcessType
+    processType: ProcessType,
   ): boolean {
-    console.log('[AgentProcess] Checking for rate limit in output (last 500 chars):', allOutput.slice(-500));
+    console.log(
+      "[AgentProcess] Checking for rate limit in output (last 500 chars):",
+      allOutput.slice(-500),
+    );
 
     const rateLimitDetection = detectRateLimit(allOutput);
-    console.log('[AgentProcess] Rate limit detection result:', {
+    console.log("[AgentProcess] Rate limit detection result:", {
       isRateLimited: rateLimitDetection.isRateLimited,
       resetTime: rateLimitDetection.resetTime,
       limitType: rateLimitDetection.limitType,
       profileId: rateLimitDetection.profileId,
-      suggestedProfile: rateLimitDetection.suggestedProfile
+      suggestedProfile: rateLimitDetection.suggestedProfile,
     });
 
     if (rateLimitDetection.isRateLimited) {
       const wasHandled = this.handleRateLimitWithAutoSwap(
         taskId,
         rateLimitDetection,
-        processType
+        processType,
       );
       if (wasHandled) return true;
 
-      const source = processType === 'spec-creation' ? 'roadmap' : 'task';
-      const rateLimitInfo = createSDKRateLimitInfo(source, rateLimitDetection, { taskId });
-      console.log('[AgentProcess] Emitting sdk-rate-limit event (manual):', rateLimitInfo);
-      this.emitter.emit('sdk-rate-limit', rateLimitInfo);
+      const source = processType === "spec-creation" ? "roadmap" : "task";
+      const rateLimitInfo = createSDKRateLimitInfo(source, rateLimitDetection, {
+        taskId,
+      });
+      console.log(
+        "[AgentProcess] Emitting sdk-rate-limit event (manual):",
+        rateLimitInfo,
+      );
+      this.emitter.emit("sdk-rate-limit", rateLimitInfo);
       return true;
     }
 
@@ -293,77 +334,111 @@ export class AgentProcessManager {
   private handleRateLimitWithAutoSwap(
     taskId: string,
     rateLimitDetection: ReturnType<typeof detectRateLimit>,
-    processType: ProcessType
+    processType: ProcessType,
   ): boolean {
     const profileManager = getClaudeProfileManager();
     const autoSwitchSettings = profileManager.getAutoSwitchSettings();
 
-    console.log('[AgentProcess] Auto-switch settings:', {
+    console.log("[AgentProcess] Auto-switch settings:", {
       enabled: autoSwitchSettings.enabled,
       autoSwitchOnRateLimit: autoSwitchSettings.autoSwitchOnRateLimit,
-      proactiveSwapEnabled: autoSwitchSettings.proactiveSwapEnabled
+      proactiveSwapEnabled: autoSwitchSettings.proactiveSwapEnabled,
     });
 
-    if (!autoSwitchSettings.enabled || !autoSwitchSettings.autoSwitchOnRateLimit) {
-      console.log('[AgentProcess] Auto-switch disabled - showing manual modal');
+    if (
+      !autoSwitchSettings.enabled ||
+      !autoSwitchSettings.autoSwitchOnRateLimit
+    ) {
+      console.log("[AgentProcess] Auto-switch disabled - showing manual modal");
       return false;
     }
 
     const currentProfileId = rateLimitDetection.profileId;
-    const bestProfile = profileManager.getBestAvailableProfile(currentProfileId);
+    const bestProfile =
+      profileManager.getBestAvailableProfile(currentProfileId);
 
-    console.log('[AgentProcess] Best available profile:', bestProfile ? {
-      id: bestProfile.id,
-      name: bestProfile.name
-    } : 'NONE');
+    console.log(
+      "[AgentProcess] Best available profile:",
+      bestProfile
+        ? {
+            id: bestProfile.id,
+            name: bestProfile.name,
+          }
+        : "NONE",
+    );
 
     if (!bestProfile) {
       // Single account case: let backend handle with intelligent pause
       // Don't show manual modal - backend will pause intelligently and resume when ready
-      console.log('[AgentProcess] No alternative profile - backend will handle with intelligent pause');
+      console.log(
+        "[AgentProcess] No alternative profile - backend will handle with intelligent pause",
+      );
       // Return false to let handleProcessFailure emit sdk-rate-limit event
       // The frontend can then show appropriate UI (e.g., "Paused until X time")
       return false;
     }
 
-    console.log('[AgentProcess] AUTO-SWAP: Switching from', currentProfileId, 'to', bestProfile.id);
+    console.log(
+      "[AgentProcess] AUTO-SWAP: Switching from",
+      currentProfileId,
+      "to",
+      bestProfile.id,
+    );
     profileManager.setActiveProfile(bestProfile.id);
 
-    const source = processType === 'spec-creation' ? 'roadmap' : 'task';
-    const rateLimitInfo = createSDKRateLimitInfo(source, rateLimitDetection, { taskId });
+    const source = processType === "spec-creation" ? "roadmap" : "task";
+    const rateLimitInfo = createSDKRateLimitInfo(source, rateLimitDetection, {
+      taskId,
+    });
     rateLimitInfo.wasAutoSwapped = true;
-    rateLimitInfo.swappedToProfile = { id: bestProfile.id, name: bestProfile.name };
-    rateLimitInfo.swapReason = 'reactive';
+    rateLimitInfo.swappedToProfile = {
+      id: bestProfile.id,
+      name: bestProfile.name,
+    };
+    rateLimitInfo.swapReason = "reactive";
 
-    console.log('[AgentProcess] Emitting sdk-rate-limit event (auto-swapped):', rateLimitInfo);
-    this.emitter.emit('sdk-rate-limit', rateLimitInfo);
+    console.log(
+      "[AgentProcess] Emitting sdk-rate-limit event (auto-swapped):",
+      rateLimitInfo,
+    );
+    this.emitter.emit("sdk-rate-limit", rateLimitInfo);
 
-    console.log('[AgentProcess] Emitting auto-swap-restart-task event for task:', taskId);
-    this.emitter.emit('auto-swap-restart-task', taskId, bestProfile.id);
+    console.log(
+      "[AgentProcess] Emitting auto-swap-restart-task event for task:",
+      taskId,
+    );
+    this.emitter.emit("auto-swap-restart-task", taskId, bestProfile.id);
     return true;
   }
 
   private handleAuthFailure(taskId: string, allOutput: string): boolean {
-    console.log('[AgentProcess] No rate limit detected - checking for auth failure');
+    console.log(
+      "[AgentProcess] No rate limit detected - checking for auth failure",
+    );
     const authFailureDetection = detectAuthFailure(allOutput);
 
     if (!authFailureDetection.isAuthFailure) {
-      console.log('[AgentProcess] Process failed but no rate limit or auth failure detected');
+      console.log(
+        "[AgentProcess] Process failed but no rate limit or auth failure detected",
+      );
       return false;
     }
 
-    console.log('[AgentProcess] Auth failure detected:', authFailureDetection);
+    console.log("[AgentProcess] Auth failure detected:", authFailureDetection);
 
     // Try auto-swap if enabled
-    const wasHandled = this.handleAuthFailureWithAutoSwap(taskId, authFailureDetection);
+    const wasHandled = this.handleAuthFailureWithAutoSwap(
+      taskId,
+      authFailureDetection,
+    );
 
     if (!wasHandled) {
       // Fall back to UI notification
-      this.emitter.emit('auth-failure', taskId, {
+      this.emitter.emit("auth-failure", taskId, {
         profileId: authFailureDetection.profileId,
         failureType: authFailureDetection.failureType,
         message: authFailureDetection.message,
-        originalError: authFailureDetection.originalError
+        originalError: authFailureDetection.originalError,
       });
     }
 
@@ -377,53 +452,74 @@ export class AgentProcessManager {
    */
   private handleAuthFailureWithAutoSwap(
     taskId: string,
-    authFailureDetection: ReturnType<typeof detectAuthFailure>
+    authFailureDetection: ReturnType<typeof detectAuthFailure>,
   ): boolean {
     const profileManager = getClaudeProfileManager();
     const autoSwitchSettings = profileManager.getAutoSwitchSettings();
 
-    console.log('[AgentProcess] Auth failure auto-switch settings:', {
+    console.log("[AgentProcess] Auth failure auto-switch settings:", {
       enabled: autoSwitchSettings.enabled,
-      autoSwitchOnAuthFailure: autoSwitchSettings.autoSwitchOnAuthFailure
+      autoSwitchOnAuthFailure: autoSwitchSettings.autoSwitchOnAuthFailure,
     });
 
     // Check if auto-switch on auth failure is enabled
-    if (!autoSwitchSettings.enabled || !autoSwitchSettings.autoSwitchOnAuthFailure) {
-      console.log('[AgentProcess] Auth failure auto-switch disabled - falling back to UI');
+    if (
+      !autoSwitchSettings.enabled ||
+      !autoSwitchSettings.autoSwitchOnAuthFailure
+    ) {
+      console.log(
+        "[AgentProcess] Auth failure auto-switch disabled - falling back to UI",
+      );
       return false;
     }
 
     const currentProfileId = authFailureDetection.profileId;
-    const bestProfile = profileManager.getBestAvailableProfile(currentProfileId);
+    const bestProfile =
+      profileManager.getBestAvailableProfile(currentProfileId);
 
-    console.log('[AgentProcess] Best available profile for auth failure swap:', bestProfile ? {
-      id: bestProfile.id,
-      name: bestProfile.name,
-      isAuthenticated: bestProfile.isAuthenticated
-    } : 'NONE');
+    console.log(
+      "[AgentProcess] Best available profile for auth failure swap:",
+      bestProfile
+        ? {
+            id: bestProfile.id,
+            name: bestProfile.name,
+            isAuthenticated: bestProfile.isAuthenticated,
+          }
+        : "NONE",
+    );
 
     // Verify the best profile is actually authenticated
     if (!bestProfile || !bestProfile.isAuthenticated) {
-      console.log('[AgentProcess] No authenticated alternative profile - falling back to UI');
+      console.log(
+        "[AgentProcess] No authenticated alternative profile - falling back to UI",
+      );
       return false;
     }
 
-    console.log('[AgentProcess] AUTH-FAILURE AUTO-SWAP:', currentProfileId, '->', bestProfile.id);
+    console.log(
+      "[AgentProcess] AUTH-FAILURE AUTO-SWAP:",
+      currentProfileId,
+      "->",
+      bestProfile.id,
+    );
     profileManager.setActiveProfile(bestProfile.id);
 
     // Emit auth-failure event with swap metadata for UI notification
-    this.emitter.emit('auth-failure', taskId, {
+    this.emitter.emit("auth-failure", taskId, {
       profileId: authFailureDetection.profileId,
       failureType: authFailureDetection.failureType,
       message: authFailureDetection.message,
       originalError: authFailureDetection.originalError,
       wasAutoSwapped: true,
-      swappedToProfile: { id: bestProfile.id, name: bestProfile.name }
+      swappedToProfile: { id: bestProfile.id, name: bestProfile.name },
     });
 
     // Reuse existing restart event
-    console.log('[AgentProcess] Emitting auto-swap-restart-task event for auth failure:', taskId);
-    this.emitter.emit('auto-swap-restart-task', taskId, bestProfile.id);
+    console.log(
+      "[AgentProcess] Emitting auto-swap-restart-task event for auth failure:",
+      taskId,
+    );
+    this.emitter.emit("auto-swap-restart-task", taskId, bestProfile.id);
     return true;
   }
 
@@ -440,7 +536,7 @@ export class AgentProcessManager {
     if (project?.settings) {
       // CLAUDE.md integration (enabled by default)
       if (project.settings.useClaudeMd !== false) {
-        env['USE_CLAUDE_MD'] = 'true';
+        env["USE_CLAUDE_MD"] = "true";
       }
     }
 
@@ -457,25 +553,27 @@ export class AgentProcessManager {
     }
 
     try {
-      const envContent = readFileSync(envPath, 'utf-8');
+      const envContent = readFileSync(envPath, "utf-8");
       const envVars: Record<string, string> = {};
 
       // Handle both Unix (\n) and Windows (\r\n) line endings
       for (const line of envContent.split(/\r?\n/)) {
         const trimmed = line.trim();
         // Skip comments and empty lines
-        if (!trimmed || trimmed.startsWith('#')) {
+        if (!trimmed || trimmed.startsWith("#")) {
           continue;
         }
 
-        const eqIndex = trimmed.indexOf('=');
+        const eqIndex = trimmed.indexOf("=");
         if (eqIndex > 0) {
           const key = trimmed.substring(0, eqIndex).trim();
           let value = trimmed.substring(eqIndex + 1).trim();
 
           // Remove quotes if present
-          if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
+          if (
+            (value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))
+          ) {
             value = value.slice(1, -1);
           }
 
@@ -505,7 +603,7 @@ export class AgentProcessManager {
       return {};
     }
 
-    const envPath = path.join(projectPath, project.autoBuildPath, '.env');
+    const envPath = path.join(projectPath, project.autoBuildPath, ".env");
     return this.parseEnvFile(envPath);
   }
 
@@ -517,7 +615,7 @@ export class AgentProcessManager {
       return {};
     }
 
-    const envPath = path.join(this.autoBuildSourcePath, '.env');
+    const envPath = path.join(this.autoBuildSourcePath, ".env");
     return this.parseEnvFile(envPath);
   }
 
@@ -530,10 +628,10 @@ export class AgentProcessManager {
     cwd: string,
     args: string[],
     extraEnv: Record<string, string> = {},
-    processType: ProcessType = 'task-execution',
-    projectId?: string
+    processType: ProcessType = "task-execution",
+    projectId?: string,
   ): Promise<void> {
-    const isSpecRunner = processType === 'spec-creation';
+    const isSpecRunner = processType === "spec-creation";
     this.killProcess(taskId);
 
     const spawnId = this.state.generateSpawnId();
@@ -546,7 +644,7 @@ export class AgentProcessManager {
       taskId,
       process: null, // Will be set after spawn() call completes below
       startedAt: new Date(),
-      spawnId
+      spawnId,
     });
 
     const env = this.setupProcessEnvironment(extraEnv);
@@ -556,31 +654,36 @@ export class AgentProcessManager {
     try {
       apiProfileEnv = await getAPIProfileEnv();
     } catch (error) {
-      console.error('[Agent Process] Failed to get API profile env:', error);
+      console.error("[Agent Process] Failed to get API profile env:", error);
       // Continue with empty profile env (falls back to OAuth mode)
     }
 
     // Get OAuth mode clearing vars (clears stale ANTHROPIC_* vars when in OAuth mode)
     const oauthModeClearVars = getOAuthModeClearVars(apiProfileEnv);
 
-    debugLog('[AgentProcess:spawnProcess] Environment merge chain for task:', taskId, {
-      baseEnv: {
-        hasOAuthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN,
-        hasApiKey: !!env.ANTHROPIC_API_KEY,
-        hasConfigDir: !!env.CLAUDE_CONFIG_DIR,
-        configDir: env.CLAUDE_CONFIG_DIR || '(not set)',
+    debugLog(
+      "[AgentProcess:spawnProcess] Environment merge chain for task:",
+      taskId,
+      {
+        baseEnv: {
+          hasOAuthToken: !!env.CLAUDE_CODE_OAUTH_TOKEN,
+          hasApiKey: !!env.ANTHROPIC_API_KEY,
+          hasConfigDir: !!env.CLAUDE_CONFIG_DIR,
+          configDir: env.CLAUDE_CONFIG_DIR || "(not set)",
+        },
+        oauthModeClearVars: Object.keys(oauthModeClearVars),
+        apiProfileEnv: {
+          hasApiKey: !!apiProfileEnv.ANTHROPIC_API_KEY,
+          hasBaseUrl: !!apiProfileEnv.ANTHROPIC_BASE_URL,
+          apiKeyPrefix:
+            apiProfileEnv.ANTHROPIC_API_KEY?.substring(0, 8) || "(not set)",
+        },
       },
-      oauthModeClearVars: Object.keys(oauthModeClearVars),
-      apiProfileEnv: {
-        hasApiKey: !!apiProfileEnv.ANTHROPIC_API_KEY,
-        hasBaseUrl: !!apiProfileEnv.ANTHROPIC_BASE_URL,
-        apiKeyPrefix: apiProfileEnv.ANTHROPIC_API_KEY?.substring(0, 8) || '(not set)',
-      },
-    });
+    );
 
     // NOTE: Python subprocess spawning removed — use spawnWorkerProcess() for AI tasks.
     // The first element of args is used as the command for backward compatibility with tests.
-    const command = args[0] ?? 'echo';
+    const command = args[0] ?? "echo";
     const commandArgs = args.slice(1);
     let childProcess;
     try {
@@ -589,14 +692,19 @@ export class AgentProcessManager {
         env: {
           ...env, // Already includes process.env, extraEnv, profileEnv, PYTHONUNBUFFERED, PYTHONUTF8
           ...oauthModeClearVars, // Clear stale ANTHROPIC_* vars when in OAuth mode
-          ...apiProfileEnv // Include active API profile config (highest priority for ANTHROPIC_* vars)
-        }
+          ...apiProfileEnv, // Include active API profile config (highest priority for ANTHROPIC_* vars)
+        },
       });
     } catch (err) {
       // spawn() failed synchronously (e.g., command not found, permission denied)
       // Clean up tracking entry and propagate error
       this.state.deleteProcess(taskId);
-      this.emitter.emit('error', taskId, err instanceof Error ? err.message : String(err), projectId);
+      this.emitter.emit(
+        "error",
+        taskId,
+        err instanceof Error ? err.message : String(err),
+        projectId,
+      );
       throw err;
     }
 
@@ -614,59 +722,87 @@ export class AgentProcessManager {
     // fall back to the local spawnId variable to check if this specific spawn was killed.
     const currentSpawnId = this.state.getProcess(taskId)?.spawnId ?? spawnId;
     if (this.state.wasSpawnKilled(currentSpawnId)) {
-      console.log(`[AgentProcess] Task ${taskId} was killed during spawn setup. Terminating newly created process.`);
+      console.log(
+        `[AgentProcess] Task ${taskId} was killed during spawn setup. Terminating newly created process.`,
+      );
       killProcessGracefully(childProcess, {
-        debugPrefix: '[AgentProcess]',
-        debug: process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development'
+        debugPrefix: "[AgentProcess]",
+        debug:
+          process.env.DEBUG === "true" ||
+          process.env.NODE_ENV === "development",
       });
       this.state.deleteProcess(taskId);
       this.state.clearKilledSpawn(currentSpawnId);
       return; // Do not proceed with this spawn
     }
 
-    let currentPhase: ExecutionProgressData['phase'] = isSpecRunner ? 'planning' : 'planning';
+    let currentPhase: ExecutionProgressData["phase"] = isSpecRunner
+      ? "planning"
+      : "planning";
     let phaseProgress = 0;
     let currentSubtask: string | undefined;
     let lastMessage: string | undefined;
-    let allOutput = '';
-    let stdoutBuffer = '';
-    let stderrBuffer = '';
+    let allOutput = "";
+    let stdoutBuffer = "";
+    let stderrBuffer = "";
     let sequenceNumber = 0;
     // FIX (ACS-203): Track completed phases to prevent phase overlaps
     // When a phase completes, it's added to this array before transitioning to the next phase
     const completedPhases: CompletablePhase[] = [];
 
-    this.emitter.emit('execution-progress', taskId, {
-      phase: currentPhase,
-      phaseProgress: 0,
-      overallProgress: this.events.calculateOverallProgress(currentPhase, 0),
-      message: isSpecRunner ? 'Starting spec creation...' : 'Starting build process...',
-      sequenceNumber: ++sequenceNumber,
-      completedPhases: [...completedPhases]
-    }, projectId);
+    this.emitter.emit(
+      "execution-progress",
+      taskId,
+      {
+        phase: currentPhase,
+        phaseProgress: 0,
+        overallProgress: this.events.calculateOverallProgress(currentPhase, 0),
+        message: isSpecRunner
+          ? "Starting spec creation..."
+          : "Starting build process...",
+        sequenceNumber: ++sequenceNumber,
+        completedPhases: [...completedPhases],
+      },
+      projectId,
+    );
 
-    const isDebug = ['true', '1', 'yes', 'on'].includes(process.env.DEBUG?.toLowerCase() ?? '');
+    const isDebug = ["true", "1", "yes", "on"].includes(
+      process.env.DEBUG?.toLowerCase() ?? "",
+    );
 
     const processLog = (line: string) => {
       allOutput = (allOutput + line).slice(-10000);
 
-      const hasMarker = line.includes('__EXEC_PHASE__');
+      const hasMarker = line.includes("__EXEC_PHASE__");
       if (isDebug && hasMarker) {
-        console.log(`[PhaseDebug:${taskId}] Found marker in line: "${line.substring(0, 200)}"`);
+        console.log(
+          `[PhaseDebug:${taskId}] Found marker in line: "${line.substring(0, 200)}"`,
+        );
       }
 
       // Log all task event markers for debugging
-      if (line.includes('__TASK_EVENT__')) {
-        console.log(`[AgentProcess:${taskId}] Found __TASK_EVENT__ marker in line:`, line.substring(0, 300));
+      if (line.includes("__TASK_EVENT__")) {
+        console.log(
+          `[AgentProcess:${taskId}] Found __TASK_EVENT__ marker in line:`,
+          line.substring(0, 300),
+        );
       }
 
       const taskEvent = parseTaskEvent(line);
       if (taskEvent) {
-        console.log(`[AgentProcess:${taskId}] Parsed task event:`, taskEvent.type, taskEvent);
-        this.emitter.emit('task-event', taskId, taskEvent, projectId);
+        console.log(
+          `[AgentProcess:${taskId}] Parsed task event:`,
+          taskEvent.type,
+          taskEvent,
+        );
+        this.emitter.emit("task-event", taskId, taskEvent, projectId);
       }
 
-      const phaseUpdate = this.events.parseExecutionPhase(line, currentPhase, isSpecRunner);
+      const phaseUpdate = this.events.parseExecutionPhase(
+        line,
+        currentPhase,
+        isSpecRunner,
+      );
 
       if (isDebug && hasMarker) {
         console.log(`[PhaseDebug:${taskId}] Parse result:`, phaseUpdate);
@@ -676,20 +812,36 @@ export class AgentProcessManager {
         const phaseChanged = phaseUpdate.phase !== currentPhase;
 
         if (isDebug) {
-          console.log(`[PhaseDebug:${taskId}] Phase update: ${currentPhase} -> ${phaseUpdate.phase} (changed: ${phaseChanged})`);
+          console.log(
+            `[PhaseDebug:${taskId}] Phase update: ${currentPhase} -> ${phaseUpdate.phase} (changed: ${phaseChanged})`,
+          );
         }
 
         // FIX (ACS-203): Manage completedPhases when phases transition
         // When leaving a non-terminal phase (not complete/failed), add it to completedPhases
-        if (phaseChanged && currentPhase !== 'idle' && currentPhase !== phaseUpdate.phase) {
+        if (
+          phaseChanged &&
+          currentPhase !== "idle" &&
+          currentPhase !== phaseUpdate.phase
+        ) {
           // Type guard to narrow currentPhase to CompletablePhase
-          const isCompletablePhase = (phase: ExecutionProgressData['phase']): phase is CompletablePhase => {
-            return ['planning', 'coding', 'qa_review', 'qa_fixing'].includes(phase);
+          const isCompletablePhase = (
+            phase: ExecutionProgressData["phase"],
+          ): phase is CompletablePhase => {
+            return ["planning", "coding", "qa_review", "qa_fixing"].includes(
+              phase,
+            );
           };
-          if (isCompletablePhase(currentPhase) && !completedPhases.includes(currentPhase)) {
+          if (
+            isCompletablePhase(currentPhase) &&
+            !completedPhases.includes(currentPhase)
+          ) {
             completedPhases.push(currentPhase);
             if (isDebug) {
-              console.log(`[PhaseDebug:${taskId}] Marked phase as completed:`, { phase: currentPhase, completedPhases });
+              console.log(`[PhaseDebug:${taskId}] Marked phase as completed:`, {
+                phase: currentPhase,
+                completedPhases,
+              });
             }
           }
         }
@@ -709,41 +861,60 @@ export class AgentProcessManager {
           phaseProgress = Math.min(90, phaseProgress + 5);
         }
 
-        const overallProgress = this.events.calculateOverallProgress(currentPhase, phaseProgress);
+        const overallProgress = this.events.calculateOverallProgress(
+          currentPhase,
+          phaseProgress,
+        );
 
         if (isDebug) {
-          console.log(`[PhaseDebug:${taskId}] Emitting execution-progress:`, { phase: currentPhase, phaseProgress, overallProgress, completedPhases });
+          console.log(`[PhaseDebug:${taskId}] Emitting execution-progress:`, {
+            phase: currentPhase,
+            phaseProgress,
+            overallProgress,
+            completedPhases,
+          });
         }
 
-        this.emitter.emit('execution-progress', taskId, {
-          phase: currentPhase,
-          phaseProgress,
-          overallProgress,
-          currentSubtask,
-          message: lastMessage,
-          sequenceNumber: ++sequenceNumber,
-          completedPhases: [...completedPhases]
-        }, projectId);
+        this.emitter.emit(
+          "execution-progress",
+          taskId,
+          {
+            phase: currentPhase,
+            phaseProgress,
+            overallProgress,
+            currentSubtask,
+            message: lastMessage,
+            sequenceNumber: ++sequenceNumber,
+            completedPhases: [...completedPhases],
+          },
+          projectId,
+        );
       }
     };
 
     const processBufferedOutput = (buffer: string, newData: string): string => {
-      if (isDebug && newData.includes('__EXEC_PHASE__')) {
-        console.log(`[PhaseDebug:${taskId}] Raw chunk with marker (${newData.length} bytes): "${newData.substring(0, 300)}"`);
-        console.log(`[PhaseDebug:${taskId}] Current buffer before append (${buffer.length} bytes): "${buffer.substring(0, 100)}"`);
+      if (isDebug && newData.includes("__EXEC_PHASE__")) {
+        console.log(
+          `[PhaseDebug:${taskId}] Raw chunk with marker (${newData.length} bytes): "${newData.substring(0, 300)}"`,
+        );
+        console.log(
+          `[PhaseDebug:${taskId}] Current buffer before append (${buffer.length} bytes): "${buffer.substring(0, 100)}"`,
+        );
       }
 
       buffer += newData;
-      const lines = buffer.split('\n');
-      const remaining = lines.pop() || '';
+      const lines = buffer.split("\n");
+      const remaining = lines.pop() || "";
 
-      if (isDebug && newData.includes('__EXEC_PHASE__')) {
-        console.log(`[PhaseDebug:${taskId}] Split into ${lines.length} complete lines, remaining buffer: "${remaining.substring(0, 100)}"`);
+      if (isDebug && newData.includes("__EXEC_PHASE__")) {
+        console.log(
+          `[PhaseDebug:${taskId}] Split into ${lines.length} complete lines, remaining buffer: "${remaining.substring(0, 100)}"`,
+        );
       }
 
       for (const line of lines) {
         if (line.trim()) {
-          this.emitter.emit('log', taskId, line + '\n', projectId);
+          this.emitter.emit("log", taskId, line + "\n", projectId);
           processLog(line);
           if (isDebug) {
             console.log(`[Agent:${taskId}] ${line}`);
@@ -754,21 +925,27 @@ export class AgentProcessManager {
       return remaining;
     };
 
-    childProcess.stdout?.on('data', (data: Buffer) => {
-      stdoutBuffer = processBufferedOutput(stdoutBuffer, data.toString('utf-8'));
+    childProcess.stdout?.on("data", (data: Buffer) => {
+      stdoutBuffer = processBufferedOutput(
+        stdoutBuffer,
+        data.toString("utf-8"),
+      );
     });
 
-    childProcess.stderr?.on('data', (data: Buffer) => {
-      stderrBuffer = processBufferedOutput(stderrBuffer, data.toString('utf-8'));
+    childProcess.stderr?.on("data", (data: Buffer) => {
+      stderrBuffer = processBufferedOutput(
+        stderrBuffer,
+        data.toString("utf-8"),
+      );
     });
 
-    childProcess.on('exit', (code: number | null) => {
+    childProcess.on("exit", (code: number | null) => {
       if (stdoutBuffer.trim()) {
-        this.emitter.emit('log', taskId, stdoutBuffer + '\n', projectId);
+        this.emitter.emit("log", taskId, stdoutBuffer + "\n", projectId);
         processLog(stdoutBuffer);
       }
       if (stderrBuffer.trim()) {
-        this.emitter.emit('log', taskId, stderrBuffer + '\n', projectId);
+        this.emitter.emit("log", taskId, stderrBuffer + "\n", projectId);
         processLog(stderrBuffer);
       }
 
@@ -780,45 +957,67 @@ export class AgentProcessManager {
       }
 
       if (code !== 0) {
-        console.log('[AgentProcess] Process failed with code:', code, 'for task:', taskId);
-        const wasHandled = this.handleProcessFailure(taskId, allOutput, processType);
+        console.log(
+          "[AgentProcess] Process failed with code:",
+          code,
+          "for task:",
+          taskId,
+        );
+        const wasHandled = this.handleProcessFailure(
+          taskId,
+          allOutput,
+          processType,
+        );
 
         if (wasHandled) {
-          this.emitter.emit('exit', taskId, code, processType, projectId);
+          this.emitter.emit("exit", taskId, code, processType, projectId);
           return;
         }
 
         // Only emit 'failed' when failure was NOT handled by auto-swap
-        if (currentPhase !== 'complete' && currentPhase !== 'failed') {
-          this.emitter.emit('execution-progress', taskId, {
-            phase: 'failed',
-            phaseProgress: 0,
-            overallProgress: this.events.calculateOverallProgress(currentPhase, phaseProgress),
-            message: `Process exited with code ${code}`,
-            sequenceNumber: ++sequenceNumber,
-            completedPhases: [...completedPhases]
-          }, projectId);
+        if (currentPhase !== "complete" && currentPhase !== "failed") {
+          this.emitter.emit(
+            "execution-progress",
+            taskId,
+            {
+              phase: "failed",
+              phaseProgress: 0,
+              overallProgress: this.events.calculateOverallProgress(
+                currentPhase,
+                phaseProgress,
+              ),
+              message: `Process exited with code ${code}`,
+              sequenceNumber: ++sequenceNumber,
+              completedPhases: [...completedPhases],
+            },
+            projectId,
+          );
         }
       }
 
-      this.emitter.emit('exit', taskId, code, processType, projectId);
+      this.emitter.emit("exit", taskId, code, processType, projectId);
     });
 
     // Handle process error
-    childProcess.on('error', (err: Error) => {
-      console.error('[AgentProcess] Process error:', err.message);
+    childProcess.on("error", (err: Error) => {
+      console.error("[AgentProcess] Process error:", err.message);
       this.state.deleteProcess(taskId);
 
-      this.emitter.emit('execution-progress', taskId, {
-        phase: 'failed',
-        phaseProgress: 0,
-        overallProgress: 0,
-        message: `Error: ${err.message}`,
-        sequenceNumber: ++sequenceNumber,
-        completedPhases: [...completedPhases]
-      }, projectId);
+      this.emitter.emit(
+        "execution-progress",
+        taskId,
+        {
+          phase: "failed",
+          phaseProgress: 0,
+          overallProgress: 0,
+          message: `Error: ${err.message}`,
+          sequenceNumber: ++sequenceNumber,
+          completedPhases: [...completedPhases],
+        },
+        projectId,
+      );
 
-      this.emitter.emit('error', taskId, err.message, projectId);
+      this.emitter.emit("error", taskId, err.message, projectId);
     });
   }
 
@@ -837,8 +1036,8 @@ export class AgentProcessManager {
     taskId: string,
     executorConfig: AgentExecutorConfig,
     extraEnv: Record<string, string> = {},
-    processType: ProcessType = 'task-execution',
-    projectId?: string
+    processType: ProcessType = "task-execution",
+    projectId?: string,
   ): Promise<void> {
     this.killProcess(taskId);
 
@@ -862,58 +1061,76 @@ export class AgentProcessManager {
 
     const bridge = new WorkerBridge();
 
-    const isDebug = ['true', '1', 'yes', 'on'].includes(process.env.DEBUG?.toLowerCase() ?? '');
+    const isDebug = ["true", "1", "yes", "on"].includes(
+      process.env.DEBUG?.toLowerCase() ?? "",
+    );
 
     // Forward all bridge events to the main emitter (matching existing event contract)
-    bridge.on('log', (tId: string, log: string, pId?: string) => {
-      this.emitter.emit('log', tId, log, pId);
+    bridge.on("log", (tId: string, log: string, pId?: string) => {
+      this.emitter.emit("log", tId, log, pId);
       if (isDebug) {
         console.log(`[Agent:${tId}] ${log}`);
       }
     });
 
-    bridge.on('error', (tId: string, error: string, pId?: string) => {
-      this.emitter.emit('error', tId, error, pId);
+    bridge.on("error", (tId: string, error: string, pId?: string) => {
+      this.emitter.emit("error", tId, error, pId);
     });
 
-    bridge.on('execution-progress', (tId: string, progress: ExecutionProgressData, pId?: string) => {
-      this.emitter.emit('execution-progress', tId, progress, pId);
+    bridge.on(
+      "execution-progress",
+      (tId: string, progress: ExecutionProgressData, pId?: string) => {
+        this.emitter.emit("execution-progress", tId, progress, pId);
+      },
+    );
+
+    bridge.on("task-event", (tId: string, event: unknown, pId?: string) => {
+      this.emitter.emit("task-event", tId, event, pId);
     });
 
-    bridge.on('task-event', (tId: string, event: unknown, pId?: string) => {
-      this.emitter.emit('task-event', tId, event, pId);
-    });
+    bridge.on(
+      "exit",
+      (tId: string, code: number | null, pType: ProcessType, pId?: string) => {
+        this.state.deleteProcess(tId);
 
-    bridge.on('exit', (tId: string, code: number | null, pType: ProcessType, pId?: string) => {
-      this.state.deleteProcess(tId);
+        if (this.state.wasSpawnKilled(spawnId)) {
+          this.state.clearKilledSpawn(spawnId);
+          return;
+        }
 
-      if (this.state.wasSpawnKilled(spawnId)) {
-        this.state.clearKilledSpawn(spawnId);
-        return;
-      }
+        if (code !== 0) {
+          // Collect any output for rate limit / auth failure detection
+          // For worker threads, error messages are emitted via 'error' events
+          // rather than stdout parsing. The handleProcessFailure method still works
+          // with accumulated output if needed.
+          this.emitter.emit(
+            "execution-progress",
+            tId,
+            {
+              phase: "failed",
+              phaseProgress: 0,
+              overallProgress: 0,
+              message: `Worker exited with code ${code}`,
+            },
+            pId,
+          );
+        }
 
-      if (code !== 0) {
-        // Collect any output for rate limit / auth failure detection
-        // For worker threads, error messages are emitted via 'error' events
-        // rather than stdout parsing. The handleProcessFailure method still works
-        // with accumulated output if needed.
-        this.emitter.emit('execution-progress', tId, {
-          phase: 'failed',
-          phaseProgress: 0,
-          overallProgress: 0,
-          message: `Worker exited with code ${code}`,
-        }, pId);
-      }
-
-      this.emitter.emit('exit', tId, code, pType, pId);
-    });
+        this.emitter.emit("exit", tId, code, pType, pId);
+      },
+    );
 
     // Spawn the worker via the bridge
     try {
       bridge.spawn(executorConfig);
     } catch (err) {
       this.state.deleteProcess(taskId);
-      this.emitter.emit('error', taskId, err instanceof Error ? err.message : String(err), projectId);
+      this.emitter.emit(
+        "error",
+        taskId,
+        err instanceof Error ? err.message : String(err),
+        projectId,
+      );
       throw err;
     }
 
@@ -930,12 +1147,17 @@ export class AgentProcessManager {
     }
 
     // Emit initial progress
-    this.emitter.emit('execution-progress', taskId, {
-      phase: processType === 'spec-creation' ? 'planning' : 'planning',
-      phaseProgress: 0,
-      overallProgress: 0,
-      message: 'Starting AI agent session...',
-    }, projectId);
+    this.emitter.emit(
+      "execution-progress",
+      taskId,
+      {
+        phase: processType === "spec-creation" ? "planning" : "planning",
+        phaseProgress: 0,
+        overallProgress: 0,
+        message: "Starting AI agent session...",
+      },
+      projectId,
+    );
   }
 
   /**
@@ -970,8 +1192,10 @@ export class AgentProcessManager {
     // Use shared platform-aware kill utility for ChildProcess
     if (agentProcess.process) {
       killProcessGracefully(agentProcess.process, {
-        debugPrefix: '[AgentProcess]',
-        debug: process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development'
+        debugPrefix: "[AgentProcess]",
+        debug:
+          process.env.DEBUG === "true" ||
+          process.env.NODE_ENV === "development",
       });
     }
 
@@ -1015,8 +1239,11 @@ export class AgentProcessManager {
 
         // Listen for exit event if the process supports it
         // (process.once is available on real ChildProcess objects, but may not be in test mocks)
-        if (agentProcess.process && typeof agentProcess.process.once === 'function') {
-          agentProcess.process.once('exit', () => {
+        if (
+          agentProcess.process &&
+          typeof agentProcess.process.once === "function"
+        ) {
+          agentProcess.process.once("exit", () => {
             clearTimeout(timeoutId);
             resolve();
           });

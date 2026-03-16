@@ -1,13 +1,13 @@
-import { ExecutionProgressData } from './types';
-import { parsePhaseEvent } from './phase-event-parser';
+import type { ExecutionProgressData } from "./types";
+import { parsePhaseEvent } from "./phase-event-parser";
 import {
   wouldPhaseRegress,
   isTerminalPhase,
   isPausePhase,
   isValidExecutionPhase,
-  type ExecutionPhase
-} from '../../shared/constants/phase-protocol';
-import { EXECUTION_PHASE_WEIGHTS } from '../../shared/constants/task';
+  type ExecutionPhase,
+} from "../../shared/constants/phase-protocol";
+import { EXECUTION_PHASE_WEIGHTS } from "../../shared/constants/task";
 
 /**
  * Structured progress event from a worker thread (via postMessage).
@@ -21,7 +21,7 @@ export interface StructuredProgressEvent {
   overallProgress?: number;
   resetTimestamp?: number;
   profileId?: string;
-  completedPhases?: ExecutionProgressData['completedPhases'];
+  completedPhases?: ExecutionProgressData["completedPhases"];
 }
 
 export class AgentEvents {
@@ -34,9 +34,9 @@ export class AgentEvents {
    */
   handleStructuredProgress(
     event: StructuredProgressEvent,
-    currentPhase: ExecutionProgressData['phase']
+    currentPhase: ExecutionProgressData["phase"],
   ): {
-    phase: ExecutionProgressData['phase'];
+    phase: ExecutionProgressData["phase"];
     message?: string;
     currentSubtask?: string;
     resetTimestamp?: number;
@@ -71,13 +71,15 @@ export class AgentEvents {
    */
   buildProgressData(
     event: StructuredProgressEvent,
-    currentPhase: ExecutionProgressData['phase']
+    currentPhase: ExecutionProgressData["phase"],
   ): ExecutionProgressData | null {
     const update = this.handleStructuredProgress(event, currentPhase);
     if (!update) return null;
 
     const phaseProgress = event.phaseProgress ?? 0;
-    const overallProgress = event.overallProgress ?? this.calculateOverallProgress(update.phase, phaseProgress);
+    const overallProgress =
+      event.overallProgress ??
+      this.calculateOverallProgress(update.phase, phaseProgress);
 
     return {
       phase: update.phase,
@@ -91,10 +93,10 @@ export class AgentEvents {
 
   parseExecutionPhase(
     log: string,
-    currentPhase: ExecutionProgressData['phase'],
-    isSpecRunner: boolean
+    currentPhase: ExecutionProgressData["phase"],
+    isSpecRunner: boolean,
   ): {
-    phase: ExecutionProgressData['phase'];
+    phase: ExecutionProgressData["phase"];
     message?: string;
     currentSubtask?: string;
     resetTimestamp?: number;
@@ -105,7 +107,7 @@ export class AgentEvents {
       // structuredEvent.phase is validated as BackendPhase (via Zod schema),
       // which is a subset of ExecutionPhase, so this assertion is safe
       const result: {
-        phase: ExecutionProgressData['phase'];
+        phase: ExecutionProgressData["phase"];
         message?: string;
         currentSubtask?: string;
         resetTimestamp?: number;
@@ -113,7 +115,7 @@ export class AgentEvents {
       } = {
         phase: structuredEvent.phase as ExecutionPhase,
         message: structuredEvent.message,
-        currentSubtask: structuredEvent.subtask
+        currentSubtask: structuredEvent.subtask,
       };
 
       // Include pause phase metadata if present
@@ -139,12 +141,15 @@ export class AgentEvents {
     }
 
     // Ignore internal task logger events - they're not phase transitions
-    if (log.includes('__TASK_LOG_')) {
+    if (log.includes("__TASK_LOG_")) {
       return null;
     }
 
     const checkRegression = (newPhase: string): boolean => {
-      if (!isValidExecutionPhase(currentPhase) || !isValidExecutionPhase(newPhase)) {
+      if (
+        !isValidExecutionPhase(currentPhase) ||
+        !isValidExecutionPhase(newPhase)
+      ) {
         return true;
       }
       return wouldPhaseRegress(currentPhase, newPhase);
@@ -155,62 +160,98 @@ export class AgentEvents {
     // Spec runner phase detection (all part of "planning")
     // IMPORTANT: Spec runner should NEVER transition to coding/qa phases via fallback matching
     if (isSpecRunner) {
-      if (lowerLog.includes('discovering') || lowerLog.includes('discovery')) {
-        return { phase: 'planning', message: 'Discovering project context...' };
+      if (lowerLog.includes("discovering") || lowerLog.includes("discovery")) {
+        return { phase: "planning", message: "Discovering project context..." };
       }
-      if (lowerLog.includes('requirements') || lowerLog.includes('gathering')) {
-        return { phase: 'planning', message: 'Gathering requirements...' };
+      if (lowerLog.includes("requirements") || lowerLog.includes("gathering")) {
+        return { phase: "planning", message: "Gathering requirements..." };
       }
-      if (lowerLog.includes('writing spec') || lowerLog.includes('spec writer')) {
-        return { phase: 'planning', message: 'Writing specification...' };
+      if (
+        lowerLog.includes("writing spec") ||
+        lowerLog.includes("spec writer")
+      ) {
+        return { phase: "planning", message: "Writing specification..." };
       }
-      if (lowerLog.includes('validating') || lowerLog.includes('validation')) {
-        return { phase: 'planning', message: 'Validating specification...' };
+      if (lowerLog.includes("validating") || lowerLog.includes("validation")) {
+        return { phase: "planning", message: "Validating specification..." };
       }
-      if (lowerLog.includes('spec complete') || lowerLog.includes('specification complete')) {
-        return { phase: 'planning', message: 'Specification complete' };
+      if (
+        lowerLog.includes("spec complete") ||
+        lowerLog.includes("specification complete")
+      ) {
+        return { phase: "planning", message: "Specification complete" };
       }
       // Spec runner: don't fall through to run.py patterns (would incorrectly detect coding phase)
       return null;
     }
 
     // Run.py phase detection
-    if (!checkRegression('planning') && (lowerLog.includes('planner agent') || lowerLog.includes('creating implementation plan'))) {
-      return { phase: 'planning', message: 'Creating implementation plan...' };
+    if (
+      !checkRegression("planning") &&
+      (lowerLog.includes("planner agent") ||
+        lowerLog.includes("creating implementation plan"))
+    ) {
+      return { phase: "planning", message: "Creating implementation plan..." };
     }
 
     // Coder agent running - don't regress from QA phases
-    if (!checkRegression('coding') && (lowerLog.includes('coder agent') || lowerLog.includes('starting coder'))) {
-      return { phase: 'coding', message: 'Implementing code changes...' };
+    if (
+      !checkRegression("coding") &&
+      (lowerLog.includes("coder agent") || lowerLog.includes("starting coder"))
+    ) {
+      return { phase: "coding", message: "Implementing code changes..." };
     }
 
     // Subtask progress detection - only when in coding phase
     const subtaskMatch = log.match(/subtask[:\s]+(\d+(?:\/\d+)?|\w+[-_]\w+)/i);
-    if (subtaskMatch && currentPhase === 'coding') {
-      return { phase: 'coding', currentSubtask: subtaskMatch[1], message: `Working on subtask ${subtaskMatch[1]}...` };
+    if (subtaskMatch && currentPhase === "coding") {
+      return {
+        phase: "coding",
+        currentSubtask: subtaskMatch[1],
+        message: `Working on subtask ${subtaskMatch[1]}...`,
+      };
     }
 
     // Subtask completion detection - don't regress from QA phases
-    if (!checkRegression('coding') && (lowerLog.includes('subtask completed') || lowerLog.includes('subtask done'))) {
-      const completedSubtask = log.match(/subtask[:\s]+"?([^"]+)"?\s+completed/i);
+    if (
+      !checkRegression("coding") &&
+      (lowerLog.includes("subtask completed") ||
+        lowerLog.includes("subtask done"))
+    ) {
+      const completedSubtask = log.match(
+        /subtask[:\s]+"?([^"]+)"?\s+completed/i,
+      );
       return {
-        phase: 'coding',
+        phase: "coding",
         currentSubtask: completedSubtask?.[1],
-        message: `Subtask ${completedSubtask?.[1] || ''} completed`
+        message: `Subtask ${completedSubtask?.[1] || ""} completed`,
       };
     }
 
     // QA phases require at least coding phase first (prevents false positives from early logs)
-    const canEnterQAPhase = currentPhase === 'coding' || currentPhase === 'qa_review' || currentPhase === 'qa_fixing';
+    const canEnterQAPhase =
+      currentPhase === "coding" ||
+      currentPhase === "qa_review" ||
+      currentPhase === "qa_fixing";
 
     // QA Review phase
-    if (canEnterQAPhase && (lowerLog.includes('qa reviewer') || lowerLog.includes('qa_reviewer') || lowerLog.includes('starting qa'))) {
-      return { phase: 'qa_review', message: 'Running QA review...' };
+    if (
+      canEnterQAPhase &&
+      (lowerLog.includes("qa reviewer") ||
+        lowerLog.includes("qa_reviewer") ||
+        lowerLog.includes("starting qa"))
+    ) {
+      return { phase: "qa_review", message: "Running QA review..." };
     }
 
     // QA Fixer phase
-    if (canEnterQAPhase && (lowerLog.includes('qa fixer') || lowerLog.includes('qa_fixer') || lowerLog.includes('fixing issues'))) {
-      return { phase: 'qa_fixing', message: 'Fixing QA issues...' };
+    if (
+      canEnterQAPhase &&
+      (lowerLog.includes("qa fixer") ||
+        lowerLog.includes("qa_fixer") ||
+        lowerLog.includes("fixing issues"))
+    ) {
+      return { phase: "qa_fixing", message: "Fixing QA issues..." };
     }
 
     // IMPORTANT: Don't set 'complete' phase via fallback text matching!
@@ -220,27 +261,45 @@ export class AgentEvents {
     // Removing this prevents the brief "Completed" flash before QA review.
 
     // Incomplete build detection - don't regress from QA phases
-    if (!checkRegression('coding') && (lowerLog.includes('build incomplete') || lowerLog.includes('subtasks still pending'))) {
-      return { phase: 'coding', message: 'Build paused - subtasks still pending' };
+    if (
+      !checkRegression("coding") &&
+      (lowerLog.includes("build incomplete") ||
+        lowerLog.includes("subtasks still pending"))
+    ) {
+      return {
+        phase: "coding",
+        message: "Build paused - subtasks still pending",
+      };
     }
 
     // Error/failure detection - be specific to avoid false positives from tool errors
-    const isToolError = lowerLog.includes('tool error') || lowerLog.includes('tool_use_error');
-    if (!isToolError && (lowerLog.includes('build failed') || lowerLog.includes('fatal error') || lowerLog.includes('agent failed'))) {
-      return { phase: 'failed', message: log.trim().substring(0, 200) };
+    const isToolError =
+      lowerLog.includes("tool error") || lowerLog.includes("tool_use_error");
+    if (
+      !isToolError &&
+      (lowerLog.includes("build failed") ||
+        lowerLog.includes("fatal error") ||
+        lowerLog.includes("agent failed"))
+    ) {
+      return { phase: "failed", message: log.trim().substring(0, 200) };
     }
 
     return null;
   }
 
-  calculateOverallProgress(phase: ExecutionProgressData['phase'], phaseProgress: number): number {
+  calculateOverallProgress(
+    phase: ExecutionProgressData["phase"],
+    phaseProgress: number,
+  ): number {
     const phaseWeight = EXECUTION_PHASE_WEIGHTS[phase];
     if (!phaseWeight) {
-      console.warn(`[AgentEvents] Unknown phase "${phase}" in calculateOverallProgress - defaulting to 0%`);
+      console.warn(
+        `[AgentEvents] Unknown phase "${phase}" in calculateOverallProgress - defaulting to 0%`,
+      );
       return 0;
     }
     const phaseRange = phaseWeight.end - phaseWeight.start;
-    return Math.round(phaseWeight.start + ((phaseRange * phaseProgress) / 100));
+    return Math.round(phaseWeight.start + (phaseRange * phaseProgress) / 100);
   }
 
   /**
@@ -251,30 +310,33 @@ export class AgentEvents {
     currentPhase: string,
     currentProgress: number,
     completedTypes: Set<string>,
-    totalTypes: number
+    totalTypes: number,
   ): { phase: string; progress: number } {
     let phase = currentPhase;
     let progress = currentProgress;
 
-    if (log.includes('PROJECT INDEX') || log.includes('PROJECT ANALYSIS')) {
-      phase = 'analyzing';
+    if (log.includes("PROJECT INDEX") || log.includes("PROJECT ANALYSIS")) {
+      phase = "analyzing";
       progress = 10;
-    } else if (log.includes('CONTEXT GATHERING')) {
-      phase = 'discovering';
+    } else if (log.includes("CONTEXT GATHERING")) {
+      phase = "discovering";
       progress = 20;
-    } else if (log.includes('GENERATING IDEAS (PARALLEL)') || (log.includes('Starting') && log.includes('ideation agents in parallel'))) {
-      phase = 'generating';
+    } else if (
+      log.includes("GENERATING IDEAS (PARALLEL)") ||
+      (log.includes("Starting") && log.includes("ideation agents in parallel"))
+    ) {
+      phase = "generating";
       progress = 30;
-    } else if (log.includes('MERGE') || log.includes('FINALIZE')) {
-      phase = 'finalizing';
+    } else if (log.includes("MERGE") || log.includes("FINALIZE")) {
+      phase = "finalizing";
       progress = 90;
-    } else if (log.includes('IDEATION COMPLETE')) {
-      phase = 'complete';
+    } else if (log.includes("IDEATION COMPLETE")) {
+      phase = "complete";
       progress = 100;
     }
 
     // Update progress based on completed types during generation phase
-    if (phase === 'generating' && completedTypes.size > 0) {
+    if (phase === "generating" && completedTypes.size > 0) {
       // Progress from 30% to 90% based on completed types
       progress = 30 + Math.floor((completedTypes.size / totalTypes) * 60);
     }
@@ -286,22 +348,29 @@ export class AgentEvents {
    * Parse roadmap progress from log output
    * Provides granular progress updates (8+ intermediate points) for better UX feedback
    */
-  parseRoadmapProgress(log: string, currentPhase: string, currentProgress: number): { phase: string; progress: number } {
+  parseRoadmapProgress(
+    log: string,
+    currentPhase: string,
+    currentProgress: number,
+  ): { phase: string; progress: number } {
     // Define roadmap phase order to prevent regression
     const ROADMAP_PHASE_ORDER: Record<string, number> = {
-      'idle': 0,
-      'analyzing': 1,
-      'discovering': 2,
-      'generating': 3,
-      'complete': 4,
-      'error': 5,
+      idle: 0,
+      analyzing: 1,
+      discovering: 2,
+      generating: 3,
+      complete: 4,
+      error: 5,
     };
 
-    const wouldRoadmapPhaseRegress = (current: string, next: string): boolean => {
+    const wouldRoadmapPhaseRegress = (
+      current: string,
+      next: string,
+    ): boolean => {
       const currentOrder = ROADMAP_PHASE_ORDER[current] ?? -1;
       const nextOrder = ROADMAP_PHASE_ORDER[next] ?? -1;
       // Allow progression to error from any phase, but otherwise prevent regression
-      if (next === 'error') return false;
+      if (next === "error") return false;
       return nextOrder < currentOrder;
     };
 
@@ -310,69 +379,69 @@ export class AgentEvents {
     let detectedPhase = currentPhase;
 
     // Phase 1: Project Analysis (10-25%)
-    if (log.includes('PROJECT ANALYSIS')) {
-      detectedPhase = 'analyzing';
+    if (log.includes("PROJECT ANALYSIS")) {
+      detectedPhase = "analyzing";
       progress = 10;
-    } else if (log.includes('Copied existing project_index')) {
-      detectedPhase = 'analyzing';
+    } else if (log.includes("Copied existing project_index")) {
+      detectedPhase = "analyzing";
       progress = 15;
-    } else if (log.includes('Running project analyzer')) {
-      detectedPhase = 'analyzing';
+    } else if (log.includes("Running project analyzer")) {
+      detectedPhase = "analyzing";
       progress = 20;
-    } else if (log.includes('project_index.json already exists')) {
-      detectedPhase = 'analyzing';
+    } else if (log.includes("project_index.json already exists")) {
+      detectedPhase = "analyzing";
       progress = 22;
-    } else if (log.includes('Created project_index')) {
-      detectedPhase = 'analyzing';
+    } else if (log.includes("Created project_index")) {
+      detectedPhase = "analyzing";
       progress = 25;
     }
 
     // Phase 2: Discovery (30-50%)
-    else if (log.includes('PROJECT DISCOVERY')) {
-      detectedPhase = 'discovering';
+    else if (log.includes("PROJECT DISCOVERY")) {
+      detectedPhase = "discovering";
       progress = 30;
-    } else if (log.includes('Analyzing project')) {
-      detectedPhase = 'discovering';
+    } else if (log.includes("Analyzing project")) {
+      detectedPhase = "discovering";
       progress = 35;
-    } else if (log.includes('Running discovery agent')) {
-      detectedPhase = 'discovering';
+    } else if (log.includes("Running discovery agent")) {
+      detectedPhase = "discovering";
       progress = 40;
-    } else if (log.includes('Discovery attempt')) {
-      detectedPhase = 'discovering';
+    } else if (log.includes("Discovery attempt")) {
+      detectedPhase = "discovering";
       progress = 45;
     } else if (
-      log.includes('roadmap_discovery.json') &&
-      !log.toLowerCase().includes('failed') &&
-      !log.toLowerCase().includes('error')
+      log.includes("roadmap_discovery.json") &&
+      !log.toLowerCase().includes("failed") &&
+      !log.toLowerCase().includes("error")
     ) {
-      detectedPhase = 'discovering';
+      detectedPhase = "discovering";
       progress = 50;
     }
 
     // Phase 3: Feature Generation (55-95%)
-    else if (log.includes('FEATURE GENERATION')) {
-      detectedPhase = 'generating';
+    else if (log.includes("FEATURE GENERATION")) {
+      detectedPhase = "generating";
       progress = 55;
-    } else if (log.includes('Generating features')) {
-      detectedPhase = 'generating';
+    } else if (log.includes("Generating features")) {
+      detectedPhase = "generating";
       progress = 60;
-    } else if (log.includes('Features attempt')) {
-      detectedPhase = 'generating';
+    } else if (log.includes("Features attempt")) {
+      detectedPhase = "generating";
       progress = 65;
-    } else if (log.includes('Prioritizing features')) {
-      detectedPhase = 'generating';
+    } else if (log.includes("Prioritizing features")) {
+      detectedPhase = "generating";
       progress = 75;
-    } else if (log.includes('Creating roadmap file')) {
-      detectedPhase = 'generating';
+    } else if (log.includes("Creating roadmap file")) {
+      detectedPhase = "generating";
       progress = 85;
-    } else if (log.includes('Created valid roadmap')) {
-      detectedPhase = 'generating';
+    } else if (log.includes("Created valid roadmap")) {
+      detectedPhase = "generating";
       progress = 90;
     }
 
     // Complete
-    else if (log.includes('ROADMAP GENERATED')) {
-      detectedPhase = 'complete';
+    else if (log.includes("ROADMAP GENERATED")) {
+      detectedPhase = "complete";
       progress = 100;
     }
 

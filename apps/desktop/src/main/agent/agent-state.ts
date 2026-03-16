@@ -1,4 +1,4 @@
-import { AgentProcess } from './types';
+import type { AgentProcess } from "./types";
 
 /**
  * Profile assignment for a task
@@ -6,7 +6,7 @@ import { AgentProcess } from './types';
 interface TaskProfileAssignment {
   profileId: string;
   profileName: string;
-  reason: 'proactive' | 'reactive' | 'manual';
+  reason: "proactive" | "reactive" | "manual";
   sessionId?: string;
 }
 
@@ -19,7 +19,8 @@ export class AgentState {
   private spawnCounter: number = 0;
 
   // Queue routing state (rate limit recovery)
-  private taskProfileAssignments: Map<string, TaskProfileAssignment> = new Map();
+  private taskProfileAssignments: Map<string, TaskProfileAssignment> =
+    new Map();
 
   /**
    * Generate a unique spawn ID
@@ -121,13 +122,16 @@ export class AgentState {
   /**
    * Get running tasks grouped by profile
    */
-  getRunningTasksByProfile(): { byProfile: Record<string, string[]>; totalRunning: number } {
+  getRunningTasksByProfile(): {
+    byProfile: Record<string, string[]>;
+    totalRunning: number;
+  } {
     const byProfile: Record<string, string[]> = {};
     let totalRunning = 0;
 
     for (const [taskId] of this.processes) {
       const assignment = this.taskProfileAssignments.get(taskId);
-      const profileId = assignment?.profileId || 'default';
+      const profileId = assignment?.profileId || "default";
 
       if (!byProfile[profileId]) {
         byProfile[profileId] = [];
@@ -146,14 +150,14 @@ export class AgentState {
     taskId: string,
     profileId: string,
     profileName: string,
-    reason: 'proactive' | 'reactive' | 'manual'
+    reason: "proactive" | "reactive" | "manual",
   ): void {
     const existing = this.taskProfileAssignments.get(taskId);
     this.taskProfileAssignments.set(taskId, {
       profileId,
       profileName,
       reason,
-      sessionId: existing?.sessionId // Preserve session ID if exists
+      sessionId: existing?.sessionId, // Preserve session ID if exists
     });
   }
 
@@ -174,7 +178,7 @@ export class AgentState {
   updateTaskSession(
     taskId: string,
     sessionId: string,
-    profileInfo?: { profileId: string; profileName: string }
+    profileInfo?: { profileId: string; profileName: string },
   ): void {
     const assignment = this.taskProfileAssignments.get(taskId);
     if (assignment) {
@@ -183,10 +187,10 @@ export class AgentState {
       // Create a minimal assignment if none exists
       // Use provided profile info or 'unknown' as a placeholder
       this.taskProfileAssignments.set(taskId, {
-        profileId: profileInfo?.profileId ?? 'unknown',
-        profileName: profileInfo?.profileName ?? 'Unknown',
-        reason: 'proactive',
-        sessionId
+        profileId: profileInfo?.profileId ?? "unknown",
+        profileName: profileInfo?.profileName ?? "Unknown",
+        reason: "proactive",
+        sessionId,
       });
     }
   }

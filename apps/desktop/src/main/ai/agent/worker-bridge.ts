@@ -112,39 +112,48 @@ export class WorkerBridge extends EventEmitter {
     const workerPath = resolveWorkerPath();
     const isTsx = workerPath.endsWith(".ts");
 
-    // When running from source via tsx, worker threads need:
-    // 1. tsx's --require/--import hooks for TypeScript compilation
-    // 2. A custom loader to resolve extensionless .ts imports (tsx doesn't
-    //    handle this in worker threads on Node 24+)
-    // 3. The electron ESM hooks for `import ... from 'electron'`
-    let tsxExecArgv: string[] | undefined;
     if (isTsx) {
-      tsxExecArgv = [];
-      for (let i = 0; i < process.execArgv.length; i++) {
-        const arg = process.execArgv[i];
-        if (arg === "--eval" || arg === "-e" || arg === "--input-type") {
-          i++; // skip next arg (the value)
-        } else {
-          tsxExecArgv.push(arg);
-        }
-      }
-      // Add custom .ts extension resolver for worker threads
-      const loaderPath = path.resolve(
+      // Web server mode (tsx): Use a bootstrap .mjs that registers tsx as the
+      // ESM loader for the worker thread. This avoids Node 24's native
+      // --experimental-strip-types which can't handle enums, while also
+      // avoiding --experimental-transform-types which breaks type-only exports.
+      const bootstrapPath = path.resolve(
         __dirname,
         "..",
         "..",
         "..",
-        "..",
         "server",
-        "worker-ts-loader.mjs",
+        "worker-bootstrap.mjs",
       );
-      tsxExecArgv.push("--import", `file://${loaderPath}`);
-    }
 
-    this.worker = new Worker(workerPath, {
-      workerData: workerConfig,
-      ...(tsxExecArgv ? { execArgv: tsxExecArgv } : {}),
-    });
+      // Filter out --eval/-e/--input-type from parent execArgv (tsx internals)
+      // and --experimental-strip-types (Node 24 default that can't handle enums)
+      const filteredArgv: string[] = [];
+      for (let i = 0; i < process.execArgv.length; i++) {
+        const arg = process.execArgv[i];
+        if (arg === "--eval" || arg === "-e" || arg === "--input-type") {
+          i++; // skip next arg (the value)
+        } else if (arg === "--experimental-strip-types") {
+          // Skip — Node 24's strip-only mode can't handle TS enums.
+          // tsx's loader will handle all TS compilation instead.
+        } else {
+          filteredArgv.push(arg);
+        }
+      }
+      // Replace strip-only mode with transform mode so Node can handle
+      // TS enums (strip-only can't, transform can).
+      filteredArgv.push("--experimental-transform-types");
+
+      this.worker = new Worker(bootstrapPath, {
+        workerData: { ...workerConfig, __workerPath: workerPath },
+        execArgv: filteredArgv,
+      });
+    } else {
+      // Electron-vite or production: load worker directly
+      this.worker = new Worker(workerPath, {
+        workerData: workerConfig,
+      });
+    }
 
     this.worker.on("message", (message: WorkerMessage) => {
       this.handleWorkerMessage(message);

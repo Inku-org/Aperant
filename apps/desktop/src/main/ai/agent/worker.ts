@@ -11,55 +11,71 @@
  * - Production: Bundled into app resources (app.isPackaged)
  */
 
-import { parentPort, workerData } from 'worker_threads';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { parentPort, workerData } from "worker_threads";
+import { readFileSync, existsSync } from "node:fs";
+import { join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import { runAgentSession } from '../session/runner';
-import { runContinuableSession } from '../session/continuation';
-import { createProvider } from '../providers/factory';
-import type { SupportedProvider } from '../providers/types';
-import { getModelContextWindow } from '../../../shared/constants/models';
-import { refreshOAuthTokenReactive } from '../auth/resolver';
-import { buildToolRegistry } from '../tools/build-registry';
-import type { ToolRegistry } from '../tools/registry';
-import { SubagentExecutorImpl } from '../orchestration/subagent-executor';
-import type { ToolContext } from '../tools/types';
-import type { SecurityProfile } from '../security/bash-validator';
+// ESM-compatible __dirname (Node's --experimental-transform-types runs as pure ESM)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+import { runAgentSession } from "../session/runner";
+import { runContinuableSession } from "../session/continuation";
+import { createProvider } from "../providers/factory";
+import type { SupportedProvider } from "../providers/types";
+import { getModelContextWindow } from "../../../shared/constants/models";
+import { refreshOAuthTokenReactive } from "../auth/resolver";
+import { buildToolRegistry } from "../tools/build-registry";
+import type { ToolRegistry } from "../tools/registry";
+import { SubagentExecutorImpl } from "../orchestration/subagent-executor";
+import type { ToolContext } from "../tools/types";
+import type { SecurityProfile } from "../security/bash-validator";
 import type {
   WorkerConfig,
   WorkerMessage,
   MainToWorkerMessage,
   SerializableSessionConfig,
   WorkerTaskEventMessage,
-} from './types';
-import type { Tool as AITool } from 'ai';
-import type { SessionConfig, StreamEvent, SessionResult } from '../session/types';
-import { BuildOrchestrator } from '../orchestration/build-orchestrator';
-import { QALoop } from '../orchestration/qa-loop';
-import { SpecOrchestrator } from '../orchestration/spec-orchestrator';
-import type { SpecPhase } from '../orchestration/spec-orchestrator';
-import type { AgentType } from '../config/agent-configs';
-import type { Phase } from '../config/types';
-import type { ExecutionPhase } from '../../../shared/constants/phase-protocol';
-import { getPhaseThinking } from '../config/phase-config';
-import { TaskLogWriter } from '../logging/task-log-writer';
-import { loadProjectInstructions, injectContext } from '../prompts/prompt-loader';
-import { createMcpClientsForAgent, mergeMcpTools, closeAllMcpClients } from '../mcp/client';
-import type { McpClientResult } from '../mcp/types';
-import { runProjectIndexer } from '../project/project-indexer';
+} from "./types";
+import type { Tool as AITool } from "ai";
+import type {
+  SessionConfig,
+  StreamEvent,
+  SessionResult,
+} from "../session/types";
+import { BuildOrchestrator } from "../orchestration/build-orchestrator";
+import { QALoop } from "../orchestration/qa-loop";
+import { SpecOrchestrator } from "../orchestration/spec-orchestrator";
+import type { SpecPhase } from "../orchestration/spec-orchestrator";
+import type { AgentType } from "../config/agent-configs";
+import type { Phase } from "../config/types";
+import type { ExecutionPhase } from "../../../shared/constants/phase-protocol";
+import { getPhaseThinking } from "../config/phase-config";
+import { TaskLogWriter } from "../logging/task-log-writer";
+import {
+  loadProjectInstructions,
+  injectContext,
+} from "../prompts/prompt-loader";
+import {
+  createMcpClientsForAgent,
+  mergeMcpTools,
+  closeAllMcpClients,
+} from "../mcp/client";
+import type { McpClientResult } from "../mcp/types";
+import { runProjectIndexer } from "../project/project-indexer";
 
 // =============================================================================
 // Validation
 // =============================================================================
 
 if (!parentPort) {
-  throw new Error('worker.ts must be run inside a worker_thread');
+  throw new Error("worker.ts must be run inside a worker_thread");
 }
 
 const config = workerData as WorkerConfig;
 if (!config?.taskId || !config?.session) {
-  throw new Error('worker.ts requires valid WorkerConfig via workerData');
+  throw new Error("worker.ts requires valid WorkerConfig via workerData");
 }
 
 // =============================================================================
@@ -81,23 +97,38 @@ function postMessage(message: WorkerMessage): void {
 }
 
 function postLog(data: string): void {
-  postMessage({ type: 'log', taskId: config.taskId, data, projectId: config.projectId });
+  postMessage({
+    type: "log",
+    taskId: config.taskId,
+    data,
+    projectId: config.projectId,
+  });
 }
 
 function postError(data: string): void {
-  postMessage({ type: 'error', taskId: config.taskId, data, projectId: config.projectId });
+  postMessage({
+    type: "error",
+    taskId: config.taskId,
+    data,
+    projectId: config.projectId,
+  });
 }
 
-function postTaskEvent(eventType: string, extra?: Record<string, unknown>): void {
+function postTaskEvent(
+  eventType: string,
+  extra?: Record<string, unknown>,
+): void {
   parentPort?.postMessage({
-    type: 'task-event',
+    type: "task-event",
     taskId: config.taskId,
     projectId: config.projectId,
     data: {
       type: eventType,
       taskId: config.taskId,
-      specId: config.session.specDir ? basename(config.session.specDir) : config.taskId,
-      projectId: config.projectId ?? '',
+      specId: config.session.specDir
+        ? basename(config.session.specDir)
+        : config.taskId,
+      projectId: config.projectId ?? "",
       timestamp: new Date().toISOString(),
       eventId: `${config.taskId}-${eventType}-${Date.now()}`,
       sequence: Date.now(),
@@ -112,8 +143,8 @@ function postTaskEvent(eventType: string, extra?: Record<string, unknown>): void
 
 const abortController = new AbortController();
 
-parentPort.on('message', (msg: MainToWorkerMessage) => {
-  if (msg.type === 'abort') {
+parentPort.on("message", (msg: MainToWorkerMessage) => {
+  if (msg.type === "abort") {
     abortController.abort();
   }
 });
@@ -126,14 +157,18 @@ parentPort.on('message', (msg: MainToWorkerMessage) => {
  * Reconstruct the SecurityProfile from the serialized form in session config.
  * SecurityProfile uses Set objects that can't cross worker boundaries.
  */
-function buildSecurityProfile(session: SerializableSessionConfig): SecurityProfile {
+function buildSecurityProfile(
+  session: SerializableSessionConfig,
+): SecurityProfile {
   const serialized = session.toolContext.securityProfile;
   return {
     baseCommands: new Set(serialized?.baseCommands ?? []),
     stackCommands: new Set(serialized?.stackCommands ?? []),
     scriptCommands: new Set(serialized?.scriptCommands ?? []),
     customCommands: new Set(serialized?.customCommands ?? []),
-    customScripts: { shellScripts: serialized?.customScripts?.shellScripts ?? [] },
+    customScripts: {
+      shellScripts: serialized?.customScripts?.shellScripts ?? [],
+    },
     getAllAllowedCommands() {
       return new Set([
         ...this.baseCommands,
@@ -148,7 +183,10 @@ function buildSecurityProfile(session: SerializableSessionConfig): SecurityProfi
 /**
  * Build a ToolContext for the given session config.
  */
-function buildToolContext(session: SerializableSessionConfig, securityProfile: SecurityProfile): ToolContext {
+function buildToolContext(
+  session: SerializableSessionConfig,
+  securityProfile: SecurityProfile,
+): ToolContext {
   return {
     cwd: session.toolContext.cwd,
     projectDir: session.toolContext.projectDir,
@@ -157,7 +195,6 @@ function buildToolContext(session: SerializableSessionConfig, securityProfile: S
     abortSignal: abortController.signal,
   };
 }
-
 
 /**
  * Load a prompt file from the prompts directory.
@@ -170,17 +207,17 @@ function loadPrompt(promptName: string): string | null {
     // Standard: apps/desktop/prompts/ relative to project root
     // The worker runs in the Electron main process — __dirname is in out/main/
     // We need to traverse up to find apps/desktop/prompts/
-    join(__dirname, '..', '..', 'prompts'),
-    join(__dirname, '..', '..', '..', 'apps', 'desktop', 'prompts'),
-    join(__dirname, '..', '..', '..', '..', 'apps', 'desktop', 'prompts'),
-    join(__dirname, 'prompts'),
+    join(__dirname, "..", "..", "prompts"),
+    join(__dirname, "..", "..", "..", "apps", "desktop", "prompts"),
+    join(__dirname, "..", "..", "..", "..", "apps", "desktop", "prompts"),
+    join(__dirname, "prompts"),
   ];
 
   for (const base of candidateBases) {
     const promptPath = join(base, `${promptName}.md`);
     try {
       if (existsSync(promptPath)) {
-        return readFileSync(promptPath, 'utf-8');
+        return readFileSync(promptPath, "utf-8");
       }
     } catch {
       // Try next
@@ -211,8 +248,13 @@ async function assemblePrompt(
   promptName: string,
   session: SerializableSessionConfig,
 ): Promise<string> {
-  const basePrompt = loadPrompt(promptName)
-    ?? buildFallbackPrompt(promptName as AgentType, session.specDir, session.projectDir);
+  const basePrompt =
+    loadPrompt(promptName) ??
+    buildFallbackPrompt(
+      promptName as AgentType,
+      session.specDir,
+      session.projectDir,
+    );
 
   // Load project instructions once per worker lifetime
   if (cachedProjectInstructions === undefined) {
@@ -220,9 +262,11 @@ async function assemblePrompt(
     cachedProjectInstructions = result?.content ?? null;
     cachedProjectInstructionsSource = result?.source ?? null;
     if (result) {
-      postLog(`Project instructions loaded from ${result.source} (${(result.content.length / 1024).toFixed(1)}KB)`);
+      postLog(
+        `Project instructions loaded from ${result.source} (${(result.content.length / 1024).toFixed(1)}KB)`,
+      );
     } else {
-      postLog('No project instructions found (checked AGENTS.md, CLAUDE.md)');
+      postLog("No project instructions found (checked AGENTS.md, CLAUDE.md)");
     }
   }
 
@@ -254,7 +298,7 @@ async function runSingleSession(
   registry: ToolRegistry,
   initialUserMessage?: string,
   skipPhaseLogging = false,
-  outputSchema?: import('zod').ZodSchema,
+  outputSchema?: import("zod").ZodSchema,
 ): Promise<SessionResult> {
   // Use queue-resolved model ID from baseSession (already mapped to the correct
   // provider-specific model, e.g., 'gpt-5.3-codex' for OpenAI Codex).
@@ -280,7 +324,7 @@ async function runSingleSession(
 
   // Build initial messages: use provided kickoff message, or fall back to session messages
   const initialMessages = initialUserMessage
-    ? [{ role: 'user' as const, content: initialUserMessage }]
+    ? [{ role: "user" as const, content: initialUserMessage }]
     : baseSession.initialMessages;
 
   // Resolve context window limit from model metadata
@@ -293,7 +337,7 @@ async function runSingleSession(
     initialMessages,
     toolContext,
     maxSteps: baseSession.maxSteps,
-    thinkingLevel: phaseThinking as SessionConfig['thinkingLevel'],
+    thinkingLevel: phaseThinking as SessionConfig["thinkingLevel"],
     abortSignal: abortController.signal,
     specDir,
     projectDir,
@@ -322,7 +366,7 @@ async function runSingleSession(
       }
       // Also relay to main thread for real-time progress updates
       postMessage({
-        type: 'stream-event',
+        type: "stream-event",
         taskId: config.taskId,
         data: event,
         projectId: config.projectId,
@@ -332,14 +376,15 @@ async function runSingleSession(
       ? () => refreshOAuthTokenReactive(baseSession.configDir as string)
       : undefined,
     onModelRefresh: baseSession.configDir
-      ? (newToken: string) => createProvider({
-          config: {
-            provider: baseSession.provider as SupportedProvider,
-            apiKey: newToken,
-            baseURL: baseSession.baseURL,
-          },
-          modelId: phaseModelId,
-        })
+      ? (newToken: string) =>
+          createProvider({
+            config: {
+              provider: baseSession.provider as SupportedProvider,
+              apiKey: newToken,
+              baseURL: baseSession.baseURL,
+            },
+            modelId: phaseModelId,
+          })
       : undefined,
   };
 
@@ -360,7 +405,10 @@ async function runSingleSession(
 
   // End phase logging — mark as completed or failed based on outcome (skip when orchestrator manages phases)
   if (logWriter && !skipPhaseLogging) {
-    const success = sessionResult.outcome === 'completed' || sessionResult.outcome === 'max_steps' || sessionResult.outcome === 'context_window';
+    const success =
+      sessionResult.outcome === "completed" ||
+      sessionResult.outcome === "max_steps" ||
+      sessionResult.outcome === "context_window";
     logWriter.endPhase(phase, success);
   }
   if (logWriter) {
@@ -377,7 +425,9 @@ async function runSingleSession(
 async function run(): Promise<void> {
   const { session } = config;
 
-  postLog(`Starting agent session: type=${session.agentType}, model=${session.modelId}`);
+  postLog(
+    `Starting agent session: type=${session.agentType}, model=${session.modelId}`,
+  );
 
   try {
     const securityProfile = buildSecurityProfile(session);
@@ -397,26 +447,30 @@ async function run(): Promise<void> {
         agentMcpRemove: session.mcpOptions?.agentMcpRemove,
       });
       if (mcpClients.length > 0) {
-        postLog(`MCP initialized: ${mcpClients.map(c => c.serverId).join(', ')}`);
+        postLog(
+          `MCP initialized: ${mcpClients.map((c) => c.serverId).join(", ")}`,
+        );
       }
     } catch (error) {
-      postLog(`MCP init failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
+      postLog(
+        `MCP init failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     // Route to orchestrator for build_orchestrator agent type
-    if (session.agentType === 'build_orchestrator') {
+    if (session.agentType === "build_orchestrator") {
       await runBuildOrchestrator(session, toolContext, registry);
       return;
     }
 
     // Route to QA loop for qa_reviewer agent type
-    if (session.agentType === 'qa_reviewer') {
+    if (session.agentType === "qa_reviewer") {
       await runQALoop(session, toolContext, registry);
       return;
     }
 
     // Route to spec orchestrator for spec_orchestrator agent type
-    if (session.agentType === 'spec_orchestrator') {
+    if (session.agentType === "spec_orchestrator") {
       if (session.useAgenticOrchestration) {
         await runAgenticSpecOrchestrator(session, toolContext, registry);
       } else {
@@ -483,55 +537,63 @@ async function runDefaultSession(
   };
 
   // Start phase logging for default session
-  const defaultPhase: Phase = session.phase ?? 'coding';
+  const defaultPhase: Phase = session.phase ?? "coding";
   if (logWriter) {
     logWriter.startPhase(defaultPhase);
   }
 
   let result: SessionResult | undefined;
   try {
-    result = await runContinuableSession(sessionConfig, {
-      tools,
-      onEvent: (event: StreamEvent) => {
-        // Write stream events to task_logs.json for UI log display
-        if (logWriter) {
-          logWriter.processEvent(event, defaultPhase);
-        }
-        postMessage({
-          type: 'stream-event',
-          taskId: config.taskId,
-          data: event,
-          projectId: config.projectId,
-        });
+    result = await runContinuableSession(
+      sessionConfig,
+      {
+        tools,
+        onEvent: (event: StreamEvent) => {
+          // Write stream events to task_logs.json for UI log display
+          if (logWriter) {
+            logWriter.processEvent(event, defaultPhase);
+          }
+          postMessage({
+            type: "stream-event",
+            taskId: config.taskId,
+            data: event,
+            projectId: config.projectId,
+          });
+        },
+        onAuthRefresh: session.configDir
+          ? () => refreshOAuthTokenReactive(session.configDir as string)
+          : undefined,
+        onModelRefresh: session.configDir
+          ? (newToken: string) =>
+              createProvider({
+                config: {
+                  provider: session.provider as SupportedProvider,
+                  apiKey: newToken,
+                  baseURL: session.baseURL,
+                },
+                modelId: session.modelId,
+              })
+          : undefined,
       },
-      onAuthRefresh: session.configDir
-        ? () => refreshOAuthTokenReactive(session.configDir as string)
-        : undefined,
-      onModelRefresh: session.configDir
-        ? (newToken: string) => createProvider({
-            config: {
-              provider: session.provider as SupportedProvider,
-              apiKey: newToken,
-              baseURL: session.baseURL,
-            },
-            modelId: session.modelId,
-          })
-        : undefined,
-    }, {
-      contextWindowLimit,
-      apiKey: session.apiKey,
-      baseURL: session.baseURL,
-      oauthTokenFilePath: session.oauthTokenFilePath,
-    });
+      {
+        contextWindowLimit,
+        apiKey: session.apiKey,
+        baseURL: session.baseURL,
+        oauthTokenFilePath: session.oauthTokenFilePath,
+      },
+    );
   } finally {
     if (logWriter) {
-      const success = result?.outcome === 'completed' || result?.outcome === 'max_steps' || result?.outcome === 'context_window';
+      const success =
+        result?.outcome === "completed" ||
+        result?.outcome === "max_steps" ||
+        result?.outcome === "context_window";
       logWriter.endPhase(defaultPhase, success ?? false);
     }
   }
 
   postMessage({
-    type: 'result',
+    type: "result",
     taskId: config.taskId,
     data: result as SessionResult,
     projectId: config.projectId,
@@ -539,13 +601,20 @@ async function runDefaultSession(
 }
 
 /** Map ExecutionPhase to Phase for log writer. Returns undefined for non-loggable phases. */
-function mapExecutionPhaseToPhase(executionPhase: ExecutionPhase): Phase | undefined {
+function mapExecutionPhaseToPhase(
+  executionPhase: ExecutionPhase,
+): Phase | undefined {
   switch (executionPhase) {
-    case 'planning': return 'planning';
-    case 'coding': return 'coding';
-    case 'qa_review': return 'qa';
-    case 'qa_fixing': return 'qa';
-    default: return undefined; // idle, complete, failed, pause states
+    case "planning":
+      return "planning";
+    case "coding":
+      return "coding";
+    case "qa_review":
+      return "qa";
+    case "qa_fixing":
+      return "qa";
+    default:
+      return undefined; // idle, complete, failed, pause states
   }
 }
 
@@ -558,7 +627,7 @@ async function runBuildOrchestrator(
   toolContext: ToolContext,
   registry: ToolRegistry,
 ): Promise<void> {
-  postLog('Starting BuildOrchestrator pipeline (planning → coding → QA)');
+  postLog("Starting BuildOrchestrator pipeline (planning → coding → QA)");
 
   const orchestrator = new BuildOrchestrator({
     specDir: session.specDir,
@@ -567,7 +636,7 @@ async function runBuildOrchestrator(
     abortSignal: abortController.signal,
 
     generatePrompt: async (agentType, _phase, context) => {
-      const promptName = agentType === 'coder' ? 'coder' : agentType;
+      const promptName = agentType === "coder" ? "coder" : agentType;
       let prompt = await assemblePrompt(promptName, session);
 
       // Inject schema validation error feedback on retry so the planner knows what to fix
@@ -579,9 +648,15 @@ async function runBuildOrchestrator(
     },
 
     runSession: async (runConfig) => {
-      postLog(`Running ${runConfig.agentType} session (phase=${runConfig.phase}, session=${runConfig.sessionNumber})`);
+      postLog(
+        `Running ${runConfig.agentType} session (phase=${runConfig.phase}, session=${runConfig.sessionNumber})`,
+      );
       // Build a kickoff message for the agent so it has a task to act on
-      const kickoffMessage = buildKickoffMessage(runConfig.agentType, runConfig.specDir, runConfig.projectDir);
+      const kickoffMessage = buildKickoffMessage(
+        runConfig.agentType,
+        runConfig.specDir,
+        runConfig.projectDir,
+      );
       return runSingleSession(
         runConfig.agentType,
         runConfig.phase,
@@ -600,7 +675,7 @@ async function runBuildOrchestrator(
     },
   });
 
-  orchestrator.on('phase-change', (phase: ExecutionPhase, message: string) => {
+  orchestrator.on("phase-change", (phase: ExecutionPhase, message: string) => {
     postLog(`Phase: ${phase} — ${message}`);
     // Start the phase in the log writer at orchestrator level (not per-session)
     const logPhase = mapExecutionPhaseToPhase(phase);
@@ -609,18 +684,21 @@ async function runBuildOrchestrator(
     }
     // Emit XState-compatible task events for phase transitions
     // so the state machine tracks the build lifecycle correctly.
-    if (phase === 'coding') {
-      postTaskEvent('CODING_STARTED', { subtaskId: '', subtaskDescription: 'Starting coding phase' });
-    } else if (phase === 'qa_review') {
-      postTaskEvent('QA_STARTED', { iteration: 0, maxIterations: 3 });
-    } else if (phase === 'qa_fixing') {
-      postTaskEvent('QA_FIXING_STARTED', { iteration: 0 });
+    if (phase === "coding") {
+      postTaskEvent("CODING_STARTED", {
+        subtaskId: "",
+        subtaskDescription: "Starting coding phase",
+      });
+    } else if (phase === "qa_review") {
+      postTaskEvent("QA_STARTED", { iteration: 0, maxIterations: 3 });
+    } else if (phase === "qa_fixing") {
+      postTaskEvent("QA_FIXING_STARTED", { iteration: 0 });
     }
     // Emit execution-progress so the main thread can:
     // 1. Re-point the file watcher to the worktree spec dir
     // 2. Update the UI with phase progress
     postMessage({
-      type: 'execution-progress',
+      type: "execution-progress",
       taskId: config.taskId,
       data: {
         phase,
@@ -632,42 +710,48 @@ async function runBuildOrchestrator(
     });
   });
 
-  orchestrator.on('iteration-start', (iteration: number, phase: ExecutionPhase) => {
-    postMessage({
-      type: 'execution-progress',
-      taskId: config.taskId,
-      data: {
-        phase,
-        phaseProgress: 0,
-        overallProgress: 0,
-        message: `Iteration ${iteration} (${phase})`,
-      },
-      projectId: config.projectId,
-    });
-  });
+  orchestrator.on(
+    "iteration-start",
+    (iteration: number, phase: ExecutionPhase) => {
+      postMessage({
+        type: "execution-progress",
+        taskId: config.taskId,
+        data: {
+          phase,
+          phaseProgress: 0,
+          overallProgress: 0,
+          message: `Iteration ${iteration} (${phase})`,
+        },
+        projectId: config.projectId,
+      });
+    },
+  );
 
-  orchestrator.on('session-complete', (_result: SessionResult, phase: string) => {
-    // Notify the main process that a session (subtask) completed.
-    // This triggers persistPlanPhaseSync → invalidateTasksCache so the frontend
-    // sees updated subtask statuses in the implementation plan.
-    postMessage({
-      type: 'execution-progress',
-      taskId: config.taskId,
-      data: {
-        phase: phase as ExecutionPhase,
-        phaseProgress: 0,
-        overallProgress: 0,
-        message: `Session complete (${phase})`,
-      },
-      projectId: config.projectId,
-    });
-  });
+  orchestrator.on(
+    "session-complete",
+    (_result: SessionResult, phase: string) => {
+      // Notify the main process that a session (subtask) completed.
+      // This triggers persistPlanPhaseSync → invalidateTasksCache so the frontend
+      // sees updated subtask statuses in the implementation plan.
+      postMessage({
+        type: "execution-progress",
+        taskId: config.taskId,
+        data: {
+          phase: phase as ExecutionPhase,
+          phaseProgress: 0,
+          overallProgress: 0,
+          message: `Session complete (${phase})`,
+        },
+        projectId: config.projectId,
+      });
+    },
+  );
 
-  orchestrator.on('log', (message: string) => {
+  orchestrator.on("log", (message: string) => {
     postLog(message);
   });
 
-  orchestrator.on('error', (error: Error, phase: string) => {
+  orchestrator.on("error", (error: Error, phase: string) => {
     postLog(`Error in ${phase} phase: ${error.message}`);
   });
 
@@ -684,10 +768,13 @@ async function runBuildOrchestrator(
     } else {
       // Terminal state (complete/failed) — close any still-active log phase
       const data = logWriter.getData();
-      for (const phase of ['validation', 'coding', 'planning'] as const) {
-        if (data.phases[phase]?.status === 'active') {
-          const mapped = phase === 'validation' ? 'qa' : phase;
-          logWriter.endPhase(mapped as 'qa' | 'coding' | 'planning', outcome.success);
+      for (const phase of ["validation", "coding", "planning"] as const) {
+        if (data.phases[phase]?.status === "active") {
+          const mapped = phase === "validation" ? "qa" : phase;
+          logWriter.endPhase(
+            mapped as "qa" | "coding" | "planning",
+            outcome.success,
+          );
           break;
         }
       }
@@ -698,36 +785,36 @@ async function runBuildOrchestrator(
   // Emit task events based on orchestration outcome so XState machine
   // can transition to the correct state (e.g., human_review on success).
   if (outcome.success) {
-    postTaskEvent('QA_PASSED');
-    postTaskEvent('BUILD_COMPLETE');
+    postTaskEvent("QA_PASSED");
+    postTaskEvent("BUILD_COMPLETE");
   } else if (outcome.codingCompleted) {
     // Coding succeeded but QA failed — emit QA-specific event so XState
     // transitions to 'error' with reviewReason='errors' instead of the
     // generic CODING_FAILED which would be misleading.
-    postTaskEvent('QA_MAX_ITERATIONS', {
+    postTaskEvent("QA_MAX_ITERATIONS", {
       iteration: outcome.totalIterations,
       maxIterations: 3,
     });
   } else {
     // Pre-QA failure (planning or coding phase)
-    postTaskEvent('CODING_FAILED', { error: outcome.error });
+    postTaskEvent("CODING_FAILED", { error: outcome.error });
   }
 
   // Map outcome to a SessionResult-compatible result for the bridge
   const result: SessionResult = {
-    outcome: outcome.success ? 'completed' : 'error',
+    outcome: outcome.success ? "completed" : "error",
     stepsExecuted: outcome.totalIterations,
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     messages: [],
     toolCallCount: 0,
     durationMs: outcome.durationMs,
     error: outcome.error
-      ? { code: 'error', message: outcome.error, retryable: false }
+      ? { code: "error", message: outcome.error, retryable: false }
       : undefined,
   };
 
   postMessage({
-    type: 'result',
+    type: "result",
     taskId: config.taskId,
     data: result,
     projectId: config.projectId,
@@ -742,7 +829,7 @@ async function runQALoop(
   toolContext: ToolContext,
   registry: ToolRegistry,
 ): Promise<void> {
-  postLog('Starting QA validation loop');
+  postLog("Starting QA validation loop");
 
   const qaLoop = new QALoop({
     specDir: session.specDir,
@@ -750,13 +837,19 @@ async function runQALoop(
     abortSignal: abortController.signal,
 
     generatePrompt: async (agentType, _context) => {
-      const promptName = agentType === 'qa_fixer' ? 'qa_fixer' : 'qa_reviewer';
+      const promptName = agentType === "qa_fixer" ? "qa_fixer" : "qa_reviewer";
       return assemblePrompt(promptName, session);
     },
 
     runSession: async (runConfig) => {
-      postLog(`Running ${runConfig.agentType} session (session=${runConfig.sessionNumber})`);
-      const kickoffMessage = buildKickoffMessage(runConfig.agentType, runConfig.specDir, runConfig.projectDir);
+      postLog(
+        `Running ${runConfig.agentType} session (session=${runConfig.sessionNumber})`,
+      );
+      const kickoffMessage = buildKickoffMessage(
+        runConfig.agentType,
+        runConfig.specDir,
+        runConfig.projectDir,
+      );
       return runSingleSession(
         runConfig.agentType,
         runConfig.phase,
@@ -774,46 +867,46 @@ async function runQALoop(
     },
   });
 
-  qaLoop.on('log', (message: string) => {
+  qaLoop.on("log", (message: string) => {
     postLog(message);
   });
 
   // Start QA validation phase logging at the loop level
   if (logWriter) {
-    logWriter.startPhase('qa');
+    logWriter.startPhase("qa");
   }
 
   const outcome = await qaLoop.run();
 
   // End QA validation phase and flush any remaining accumulated log entries
   if (logWriter) {
-    logWriter.endPhase('qa', outcome.approved);
+    logWriter.endPhase("qa", outcome.approved);
     logWriter.flush();
   }
 
   // Emit task events so XState machine transitions correctly.
   if (outcome.approved) {
-    postTaskEvent('QA_PASSED');
-  } else if (outcome.reason === 'max_iterations') {
-    postTaskEvent('QA_MAX_ITERATIONS');
+    postTaskEvent("QA_PASSED");
+  } else if (outcome.reason === "max_iterations") {
+    postTaskEvent("QA_MAX_ITERATIONS");
   } else {
-    postTaskEvent('QA_AGENT_ERROR', { error: outcome.error });
+    postTaskEvent("QA_AGENT_ERROR", { error: outcome.error });
   }
 
   const result: SessionResult = {
-    outcome: outcome.approved ? 'completed' : 'error',
+    outcome: outcome.approved ? "completed" : "error",
     stepsExecuted: outcome.totalIterations,
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     messages: [],
     toolCallCount: 0,
     durationMs: outcome.durationMs,
     error: outcome.error
-      ? { code: 'error', message: outcome.error, retryable: false }
+      ? { code: "error", message: outcome.error, retryable: false }
       : undefined,
   };
 
   postMessage({
-    type: 'result',
+    type: "result",
     taskId: config.taskId,
     data: result,
     projectId: config.projectId,
@@ -830,23 +923,29 @@ async function runSpecOrchestrator(
 ): Promise<void> {
   // Extract the task description from the first user message
   const taskDescription = session.initialMessages?.[0]?.content
-    ? typeof session.initialMessages[0].content === 'string'
+    ? typeof session.initialMessages[0].content === "string"
       ? session.initialMessages[0].content
-      : 'Create the specification as described in your system prompt.'
-    : 'Create the specification as described in your system prompt.';
+      : "Create the specification as described in your system prompt."
+    : "Create the specification as described in your system prompt.";
 
-  postLog(`Starting SpecOrchestrator pipeline (complexity-first phase routing)`);
+  postLog(
+    `Starting SpecOrchestrator pipeline (complexity-first phase routing)`,
+  );
 
   // Generate project index BEFORE any agent runs — gives all phases project context
   let projectIndexContent: string | undefined;
   try {
-    const indexOutputPath = join(session.specDir, 'project_index.json');
-    postLog('Generating project index...');
+    const indexOutputPath = join(session.specDir, "project_index.json");
+    postLog("Generating project index...");
     runProjectIndexer(session.projectDir, indexOutputPath);
-    projectIndexContent = readFileSync(indexOutputPath, 'utf-8');
-    postLog(`Project index generated (${(projectIndexContent.length / 1024).toFixed(1)}KB)`);
+    projectIndexContent = readFileSync(indexOutputPath, "utf-8");
+    postLog(
+      `Project index generated (${(projectIndexContent.length / 1024).toFixed(1)}KB)`,
+    );
   } catch (error) {
-    postLog(`Project index generation failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
+    postLog(
+      `Project index generation failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   const orchestrator = new SpecOrchestrator({
@@ -869,7 +968,9 @@ async function runSpecOrchestrator(
     },
 
     runSession: async (runConfig) => {
-      postLog(`Running ${runConfig.agentType} session (spec phase=${runConfig.specPhase ?? runConfig.phase}, session=${runConfig.sessionNumber})`);
+      postLog(
+        `Running ${runConfig.agentType} session (spec phase=${runConfig.specPhase ?? runConfig.phase}, session=${runConfig.sessionNumber})`,
+      );
       const kickoffMessage = buildSpecKickoffMessage(
         runConfig.agentType,
         runConfig.specDir,
@@ -903,36 +1004,42 @@ async function runSpecOrchestrator(
   });
 
   // Wire event listeners
-  orchestrator.on('phase-start', (phase: SpecPhase, phaseNumber: number, totalPhases: number) => {
-    postLog(`Spec phase ${phaseNumber}/${totalPhases}: ${phase}`);
-    if (logWriter) {
-      logWriter.startPhase('spec', `${phase} (${phaseNumber}/${totalPhases})`);
-    }
-    postMessage({
-      type: 'execution-progress',
-      taskId: config.taskId,
-      data: {
-        phase: 'planning', // spec creation maps to 'planning' in the UI execution phases
-        phaseProgress: phaseNumber / Math.max(totalPhases, 1),
-        overallProgress: phaseNumber / Math.max(totalPhases, 1),
-        message: `Spec creation: ${phase} (${phaseNumber}/${totalPhases})`,
-      },
-      projectId: config.projectId,
-    });
-  });
+  orchestrator.on(
+    "phase-start",
+    (phase: SpecPhase, phaseNumber: number, totalPhases: number) => {
+      postLog(`Spec phase ${phaseNumber}/${totalPhases}: ${phase}`);
+      if (logWriter) {
+        logWriter.startPhase(
+          "spec",
+          `${phase} (${phaseNumber}/${totalPhases})`,
+        );
+      }
+      postMessage({
+        type: "execution-progress",
+        taskId: config.taskId,
+        data: {
+          phase: "planning", // spec creation maps to 'planning' in the UI execution phases
+          phaseProgress: phaseNumber / Math.max(totalPhases, 1),
+          overallProgress: phaseNumber / Math.max(totalPhases, 1),
+          message: `Spec creation: ${phase} (${phaseNumber}/${totalPhases})`,
+        },
+        projectId: config.projectId,
+      });
+    },
+  );
 
-  orchestrator.on('phase-complete', (_phase: SpecPhase, _result: unknown) => {
+  orchestrator.on("phase-complete", (_phase: SpecPhase, _result: unknown) => {
     // End the current spec log phase so the next one can start fresh
     if (logWriter) {
-      logWriter.endPhase('spec', true);
+      logWriter.endPhase("spec", true);
     }
   });
 
-  orchestrator.on('log', (message: string) => {
+  orchestrator.on("log", (message: string) => {
     postLog(message);
   });
 
-  orchestrator.on('error', (error: Error, phase: SpecPhase) => {
+  orchestrator.on("error", (error: Error, phase: SpecPhase) => {
     postLog(`Error in spec ${phase} phase: ${error.message}`);
   });
 
@@ -941,34 +1048,34 @@ async function runSpecOrchestrator(
   // Emit task event on failure so XState gets a specific signal
   // instead of relying on the generic PROCESS_EXITED fallback.
   if (!outcome.success) {
-    postTaskEvent('PLANNING_FAILED', { error: outcome.error });
+    postTaskEvent("PLANNING_FAILED", { error: outcome.error });
   }
 
   // Ensure any still-active log phase is closed and flushed
   if (logWriter) {
     const data = logWriter.getData();
     // toLogPhase('spec') maps to 'planning' in the log writer
-    if (data.phases.planning?.status === 'active') {
-      logWriter.endPhase('spec', outcome.success);
+    if (data.phases.planning?.status === "active") {
+      logWriter.endPhase("spec", outcome.success);
     }
     logWriter.flush();
   }
 
   // Map outcome to SessionResult for the worker bridge
   const result: SessionResult = {
-    outcome: outcome.success ? 'completed' : 'error',
+    outcome: outcome.success ? "completed" : "error",
     stepsExecuted: outcome.phasesExecuted.length,
     usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
     messages: [],
     toolCallCount: 0,
     durationMs: outcome.durationMs,
     error: outcome.error
-      ? { code: 'error', message: outcome.error, retryable: false }
+      ? { code: "error", message: outcome.error, retryable: false }
       : undefined,
   };
 
   postMessage({
-    type: 'result',
+    type: "result",
     taskId: config.taskId,
     data: result,
     projectId: config.projectId,
@@ -987,23 +1094,29 @@ async function runAgenticSpecOrchestrator(
 ): Promise<void> {
   // Extract task description
   const taskDescription = session.initialMessages?.[0]?.content
-    ? typeof session.initialMessages[0].content === 'string'
+    ? typeof session.initialMessages[0].content === "string"
       ? session.initialMessages[0].content
-      : 'Create the specification as described in your system prompt.'
-    : 'Create the specification as described in your system prompt.';
+      : "Create the specification as described in your system prompt."
+    : "Create the specification as described in your system prompt.";
 
-  postLog('Starting Agentic SpecOrchestrator (AI-driven pipeline via SpawnSubagent)');
+  postLog(
+    "Starting Agentic SpecOrchestrator (AI-driven pipeline via SpawnSubagent)",
+  );
 
   // Generate project index
   let projectIndexContent: string | undefined;
   try {
-    const indexOutputPath = join(session.specDir, 'project_index.json');
-    postLog('Generating project index...');
+    const indexOutputPath = join(session.specDir, "project_index.json");
+    postLog("Generating project index...");
     runProjectIndexer(session.projectDir, indexOutputPath);
-    projectIndexContent = readFileSync(indexOutputPath, 'utf-8');
-    postLog(`Project index generated (${(projectIndexContent.length / 1024).toFixed(1)}KB)`);
+    projectIndexContent = readFileSync(indexOutputPath, "utf-8");
+    postLog(
+      `Project index generated (${(projectIndexContent.length / 1024).toFixed(1)}KB)`,
+    );
   } catch (error) {
-    postLog(`Project index generation failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`);
+    postLog(
+      `Project index generation failed (non-fatal): ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   // Create the SubagentExecutor
@@ -1024,7 +1137,8 @@ async function runAgenticSpecOrchestrator(
       ...toolContext,
       allowedWritePaths: [session.specDir],
     },
-    loadPrompt: async (promptName: string) => assemblePrompt(promptName, session),
+    loadPrompt: async (promptName: string) =>
+      assemblePrompt(promptName, session),
     abortSignal: abortController.signal,
     onSubagentEvent: (agentType: string, event: string) => {
       postLog(`Subagent ${agentType}: ${event}`);
@@ -1032,14 +1146,19 @@ async function runAgenticSpecOrchestrator(
   });
 
   // Create an extended tool context with the executor
-  const orchestratorToolContext: ToolContext & { subagentExecutor: SubagentExecutorImpl } = {
+  const orchestratorToolContext: ToolContext & {
+    subagentExecutor: SubagentExecutorImpl;
+  } = {
     ...toolContext,
     allowedWritePaths: [session.specDir],
     subagentExecutor: executor,
   };
 
   // Load the agentic orchestrator prompt
-  const systemPrompt = await assemblePrompt('spec_orchestrator_agentic', session);
+  const systemPrompt = await assemblePrompt(
+    "spec_orchestrator_agentic",
+    session,
+  );
 
   // Build the kickoff message
   const kickoffParts = [
@@ -1049,86 +1168,96 @@ async function runAgenticSpecOrchestrator(
   ];
 
   if (projectIndexContent) {
-    kickoffParts.push(`\n\n## PROJECT INDEX\n\n\`\`\`json\n${projectIndexContent}\n\`\`\``);
+    kickoffParts.push(
+      `\n\n## PROJECT INDEX\n\n\`\`\`json\n${projectIndexContent}\n\`\`\``,
+    );
   }
 
-  const kickoffMessage = kickoffParts.join('');
+  const kickoffMessage = kickoffParts.join("");
 
   // Resolve context window and tools
   const contextWindowLimit = getModelContextWindow(session.modelId);
-  const phaseThinking = await getPhaseThinking(session.specDir, 'spec');
+  const phaseThinking = await getPhaseThinking(session.specDir, "spec");
 
   // Get tools for the orchestrator (includes SpawnSubagent since it's in AGENT_CONFIGS)
   const tools: Record<string, AITool> = {
-    ...registry.getToolsForAgent('spec_orchestrator', orchestratorToolContext),
+    ...registry.getToolsForAgent("spec_orchestrator", orchestratorToolContext),
     ...(mergeMcpTools(mcpClients) as Record<string, AITool>),
   };
 
   const sessionConfig: SessionConfig = {
-    agentType: 'spec_orchestrator',
+    agentType: "spec_orchestrator",
     model,
     systemPrompt,
-    initialMessages: [{ role: 'user' as const, content: kickoffMessage }],
+    initialMessages: [{ role: "user" as const, content: kickoffMessage }],
     toolContext: orchestratorToolContext,
     maxSteps: session.maxSteps,
-    thinkingLevel: phaseThinking as SessionConfig['thinkingLevel'],
+    thinkingLevel: phaseThinking as SessionConfig["thinkingLevel"],
     abortSignal: abortController.signal,
     specDir: session.specDir,
     projectDir: session.projectDir,
-    phase: 'spec',
+    phase: "spec",
     sessionNumber: 1,
     contextWindowLimit,
   };
 
   // Start phase logging
   if (logWriter) {
-    logWriter.startPhase('spec', 'Agentic spec orchestration');
+    logWriter.startPhase("spec", "Agentic spec orchestration");
   }
 
   let result: SessionResult | undefined;
   try {
-    result = await runContinuableSession(sessionConfig, {
-      tools,
-      onEvent: (event: StreamEvent) => {
-        if (logWriter) {
-          logWriter.processEvent(event, 'spec');
-        }
-        postMessage({
-          type: 'stream-event',
-          taskId: config.taskId,
-          data: event,
-          projectId: config.projectId,
-        });
+    result = await runContinuableSession(
+      sessionConfig,
+      {
+        tools,
+        onEvent: (event: StreamEvent) => {
+          if (logWriter) {
+            logWriter.processEvent(event, "spec");
+          }
+          postMessage({
+            type: "stream-event",
+            taskId: config.taskId,
+            data: event,
+            projectId: config.projectId,
+          });
+        },
+        onAuthRefresh: session.configDir
+          ? () => refreshOAuthTokenReactive(session.configDir as string)
+          : undefined,
+        onModelRefresh: session.configDir
+          ? (newToken: string) =>
+              createProvider({
+                config: {
+                  provider: session.provider as SupportedProvider,
+                  apiKey: newToken,
+                  baseURL: session.baseURL,
+                },
+                modelId: session.modelId,
+              })
+          : undefined,
       },
-      onAuthRefresh: session.configDir
-        ? () => refreshOAuthTokenReactive(session.configDir as string)
-        : undefined,
-      onModelRefresh: session.configDir
-        ? (newToken: string) => createProvider({
-            config: {
-              provider: session.provider as SupportedProvider,
-              apiKey: newToken,
-              baseURL: session.baseURL,
-            },
-            modelId: session.modelId,
-          })
-        : undefined,
-    }, {
-      contextWindowLimit,
-      apiKey: session.apiKey,
-      baseURL: session.baseURL,
-      oauthTokenFilePath: session.oauthTokenFilePath,
-    });
+      {
+        contextWindowLimit,
+        apiKey: session.apiKey,
+        baseURL: session.baseURL,
+        oauthTokenFilePath: session.oauthTokenFilePath,
+      },
+    );
   } finally {
     if (logWriter) {
-      const success = result?.outcome === 'completed' || result?.outcome === 'max_steps' || result?.outcome === 'context_window';
-      logWriter.endPhase('spec', success ?? false);
+      const success =
+        result?.outcome === "completed" ||
+        result?.outcome === "max_steps" ||
+        result?.outcome === "context_window";
+      logWriter.endPhase("spec", success ?? false);
       logWriter.flush();
     }
   }
 
   postMessage({
-    type: 'result',
+    type: "result",
     taskId: config.taskId,
     data: result as SessionResult,
     projectId: config.projectId,
@@ -1141,18 +1270,30 @@ async function runAgenticSpecOrchestrator(
  */
 function specPhaseToPromptName(phase: SpecPhase): string {
   switch (phase) {
-    case 'discovery': return 'spec_gatherer';
-    case 'requirements': return 'spec_gatherer';
-    case 'complexity_assessment': return 'complexity_assessor';
-    case 'research': return 'spec_researcher';
-    case 'context': return 'spec_writer';
-    case 'historical_context': return 'spec_writer';
-    case 'spec_writing': return 'spec_writer';
-    case 'self_critique': return 'spec_critic';
-    case 'planning': return 'planner';
-    case 'quick_spec': return 'spec_quick';
-    case 'validation': return 'spec_writer';
-    default: return 'spec_writer';
+    case "discovery":
+      return "spec_gatherer";
+    case "requirements":
+      return "spec_gatherer";
+    case "complexity_assessment":
+      return "complexity_assessor";
+    case "research":
+      return "spec_researcher";
+    case "context":
+      return "spec_writer";
+    case "historical_context":
+      return "spec_writer";
+    case "spec_writing":
+      return "spec_writer";
+    case "self_critique":
+      return "spec_critic";
+    case "planning":
+      return "planner";
+    case "quick_spec":
+      return "spec_quick";
+    case "validation":
+      return "spec_writer";
+    default:
+      return "spec_writer";
   }
 }
 
@@ -1174,69 +1315,82 @@ function buildSpecKickoffMessage(
 
   // Spec phase takes priority over agentType for kickoff routing
   // (e.g., complexity_assessment uses spec_gatherer agentType but needs a different kickoff)
-  if (specPhase === 'complexity_assessment') {
+  if (specPhase === "complexity_assessment") {
     baseMessage = `Assess the complexity of the following task and write your assessment to ${specDir}/complexity_assessment.json. Task: ${taskDescription}. Project root: ${projectDir}. Determine if this is a SIMPLE, STANDARD, or COMPLEX task based on the scope of changes required.\n\nIMPORTANT: This is the FIRST phase of the spec pipeline. No spec.md or other spec files exist yet — do NOT attempt to read them. Assess complexity based on the task description and the project structure at ${projectDir} only.`;
-  } else switch (agentType) {
-    case 'spec_discovery':
-      baseMessage = `Analyze the project structure at ${projectDir} to understand the codebase architecture, tech stack, and conventions. Write your findings to ${specDir}/context.json. Task context: ${taskDescription}\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Analyze the project source code at ${projectDir} directly.`;
-      break;
-    case 'spec_gatherer':
-      baseMessage = `Gather and validate requirements for the following task: ${taskDescription}. Project root: ${projectDir}. Write requirements to ${specDir}/requirements.json.\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Derive requirements from the task description and the project source code at ${projectDir}.`;
-      break;
-    case 'spec_researcher':
-      baseMessage = `Research implementation approaches for: ${taskDescription}. Review relevant code in ${projectDir} and document your findings in ${specDir}/research.json.`;
-      break;
-    case 'spec_writer':
-      baseMessage = `Write the specification for: ${taskDescription}. Write spec.md to ${specDir}. Project root: ${projectDir}.`;
-      break;
-    case 'planner':
-      baseMessage = `Create a detailed implementation plan for: ${taskDescription}. Read the spec at ${specDir}/spec.md and create ${specDir}/implementation_plan.json with concrete coding subtasks. Project root: ${projectDir}.`;
-      break;
-    case 'spec_critic':
-      baseMessage = `Review and critique the specification at ${specDir}/spec.md for completeness, clarity, and technical feasibility. Write your critique findings back to ${specDir}/spec.md with improvements.`;
-      break;
-    case 'spec_context':
-      baseMessage = `Gather project context relevant to: ${taskDescription}. Analyze the codebase at ${projectDir} and write context to ${specDir}/context.json.\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Analyze the project source code at ${projectDir} directly.`;
-      break;
-    case 'spec_validation':
-      baseMessage = `Validate that ${specDir}/spec.md and ${specDir}/implementation_plan.json are complete, consistent, and ready for implementation. Fix any issues found.`;
-      break;
-    default:
-      baseMessage = `Complete the spec creation task described in your system prompt. Task: ${taskDescription}. Spec directory: ${specDir}. Project directory: ${projectDir}`;
-  }
+  } else
+    switch (agentType) {
+      case "spec_discovery":
+        baseMessage = `Analyze the project structure at ${projectDir} to understand the codebase architecture, tech stack, and conventions. Write your findings to ${specDir}/context.json. Task context: ${taskDescription}\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Analyze the project source code at ${projectDir} directly.`;
+        break;
+      case "spec_gatherer":
+        baseMessage = `Gather and validate requirements for the following task: ${taskDescription}. Project root: ${projectDir}. Write requirements to ${specDir}/requirements.json.\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Derive requirements from the task description and the project source code at ${projectDir}.`;
+        break;
+      case "spec_researcher":
+        baseMessage = `Research implementation approaches for: ${taskDescription}. Review relevant code in ${projectDir} and document your findings in ${specDir}/research.json.`;
+        break;
+      case "spec_writer":
+        baseMessage = `Write the specification for: ${taskDescription}. Write spec.md to ${specDir}. Project root: ${projectDir}.`;
+        break;
+      case "planner":
+        baseMessage = `Create a detailed implementation plan for: ${taskDescription}. Read the spec at ${specDir}/spec.md and create ${specDir}/implementation_plan.json with concrete coding subtasks. Project root: ${projectDir}.`;
+        break;
+      case "spec_critic":
+        baseMessage = `Review and critique the specification at ${specDir}/spec.md for completeness, clarity, and technical feasibility. Write your critique findings back to ${specDir}/spec.md with improvements.`;
+        break;
+      case "spec_context":
+        baseMessage = `Gather project context relevant to: ${taskDescription}. Analyze the codebase at ${projectDir} and write context to ${specDir}/context.json.\n\nIMPORTANT: This is an early phase of the spec pipeline. No spec.md exists yet — do NOT attempt to read it. Analyze the project source code at ${projectDir} directly.`;
+        break;
+      case "spec_validation":
+        baseMessage = `Validate that ${specDir}/spec.md and ${specDir}/implementation_plan.json are complete, consistent, and ready for implementation. Fix any issues found.`;
+        break;
+      default:
+        baseMessage = `Complete the spec creation task described in your system prompt. Task: ${taskDescription}. Spec directory: ${specDir}. Project directory: ${projectDir}`;
+    }
 
   // Inject accumulated context from prior phases
   const contextSections: string[] = [baseMessage];
 
   if (projectIndex) {
-    contextSections.push(`\n\n## PROJECT INDEX (pre-generated)\n\nThe following project structure analysis has been pre-generated for you. Use this as your starting point instead of scanning the entire project:\n\n\`\`\`json\n${projectIndex}\n\`\`\``);
+    contextSections.push(
+      `\n\n## PROJECT INDEX (pre-generated)\n\nThe following project structure analysis has been pre-generated for you. Use this as your starting point instead of scanning the entire project:\n\n\`\`\`json\n${projectIndex}\n\`\`\``,
+    );
   }
 
   if (priorPhaseOutputs && Object.keys(priorPhaseOutputs).length > 0) {
-    contextSections.push('\n\n## CONTEXT FROM PRIOR PHASES\n\nThe following outputs from earlier spec phases are provided to avoid re-reading files:');
+    contextSections.push(
+      "\n\n## CONTEXT FROM PRIOR PHASES\n\nThe following outputs from earlier spec phases are provided to avoid re-reading files:",
+    );
     for (const [fileName, content] of Object.entries(priorPhaseOutputs)) {
-      const ext = fileName.endsWith('.json') ? 'json' : 'markdown';
-      contextSections.push(`\n### ${fileName}\n\n\`\`\`${ext}\n${content}\n\`\`\``);
+      const ext = fileName.endsWith(".json") ? "json" : "markdown";
+      contextSections.push(
+        `\n### ${fileName}\n\n\`\`\`${ext}\n${content}\n\`\`\``,
+      );
     }
-    contextSections.push('\nUse these outputs as your primary source of context. Only read additional project files if you need specific code patterns not covered above.');
+    contextSections.push(
+      "\nUse these outputs as your primary source of context. Only read additional project files if you need specific code patterns not covered above.",
+    );
   }
 
-  return contextSections.join('');
+  return contextSections.join("");
 }
 
 /**
  * Build a kickoff user message for an agent session.
  * The AI SDK requires at least one user message; this provides a concrete task directive.
  */
-function buildKickoffMessage(agentType: AgentType, specDir: string, projectDir: string): string {
+function buildKickoffMessage(
+  agentType: AgentType,
+  specDir: string,
+  projectDir: string,
+): string {
   switch (agentType) {
-    case 'planner':
+    case "planner":
       return `Read the spec at ${specDir}/spec.md and create a detailed implementation plan at ${specDir}/implementation_plan.json. Project root: ${projectDir}`;
-    case 'coder':
+    case "coder":
       return `Read ${specDir}/implementation_plan.json and implement the next pending subtask. Project root: ${projectDir}. After completing the subtask, update its status to "completed" in implementation_plan.json.`;
-    case 'qa_reviewer':
+    case "qa_reviewer":
       return `Review the implementation in ${projectDir} against the specification in ${specDir}/spec.md. Write your findings to ${specDir}/qa_report.md with a clear "Status: PASSED" or "Status: FAILED" line.`;
-    case 'qa_fixer':
+    case "qa_fixer":
       return `Read ${specDir}/qa_report.md for the issues found by QA review. Fix all issues in ${projectDir}. After fixing, update ${specDir}/qa_report.md to indicate fixes have been applied.`;
     default:
       return `Complete the task described in your system prompt. Spec directory: ${specDir}. Project directory: ${projectDir}`;
@@ -1246,15 +1400,19 @@ function buildKickoffMessage(agentType: AgentType, specDir: string, projectDir: 
 /**
  * Build a minimal fallback prompt when the prompts directory is not found.
  */
-function buildFallbackPrompt(agentType: AgentType, specDir: string, projectDir: string): string {
+function buildFallbackPrompt(
+  agentType: AgentType,
+  specDir: string,
+  projectDir: string,
+): string {
   switch (agentType) {
-    case 'planner':
+    case "planner":
       return `You are a planning agent. Read spec.md in ${specDir} and create implementation_plan.json with phases and subtasks. Each subtask must have id, description, and status fields. Set all statuses to "pending".`;
-    case 'coder':
+    case "coder":
       return `You are a coding agent. Implement the current pending subtask from implementation_plan.json in ${specDir}. Project root: ${projectDir}. After completing the subtask, update its status to "completed" in implementation_plan.json.`;
-    case 'qa_reviewer':
+    case "qa_reviewer":
       return `You are a QA reviewer. Review the implementation in ${projectDir} against the spec in ${specDir}/spec.md. Write your findings to ${specDir}/qa_report.md with "Status: PASSED" or "Status: FAILED".`;
-    case 'qa_fixer':
+    case "qa_fixer":
       return `You are a QA fixer. Read ${specDir}/qa_report.md for the issues found by QA review. Fix the issues in ${projectDir}. After fixing, update ${specDir}/implementation_plan.json qa_signoff status to "fixes_applied".`;
     default:
       return `You are an AI agent. Complete the task described in ${specDir}/spec.md for the project at ${projectDir}.`;

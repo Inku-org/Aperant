@@ -11,15 +11,21 @@
  * - Immutable configurations
  */
 
-import * as os from 'os';
-import * as path from 'path';
-import { existsSync } from 'fs';
-import { spawn, ChildProcess } from 'child_process';
-import { OS, ShellType, PathConfig, ShellConfig, BinaryDirectories } from './types';
-import { getTaskkillExePath } from '../utils/windows-paths';
+import * as os from "os";
+import * as path from "path";
+import { existsSync } from "fs";
+import { spawn, ChildProcess } from "child_process";
+import { OS, ShellType } from "./types";
+import type { PathConfig, ShellConfig, BinaryDirectories } from "./types";
+import { getTaskkillExePath } from "../utils/windows-paths";
 
 // Re-export from paths.ts for backward compatibility
-export { getWindowsShellPaths, getOllamaExecutablePaths, getOllamaInstallCommand, getWhichCommand } from './paths';
+export {
+  getWindowsShellPaths,
+  getOllamaExecutablePaths,
+  getOllamaInstallCommand,
+  getWhichCommand,
+} from "./paths";
 
 /**
  * Get the current operating system
@@ -29,7 +35,11 @@ export { getWindowsShellPaths, getOllamaExecutablePaths, getOllamaInstallCommand
  */
 export function getCurrentOS(): OS {
   const platform = process.platform;
-  if (platform === OS.Windows || platform === OS.macOS || platform === OS.Linux) {
+  if (
+    platform === OS.Windows ||
+    platform === OS.macOS ||
+    platform === OS.Linux
+  ) {
     return platform as OS;
   }
   // Default to Linux for other Unix-like systems
@@ -71,15 +81,15 @@ export function getPathConfig(): PathConfig {
   if (isWindows()) {
     return {
       separator: path.sep,
-      delimiter: ';',
-      executableExtensions: ['.exe', '.cmd', '.bat', '.ps1']
+      delimiter: ";",
+      executableExtensions: [".exe", ".cmd", ".bat", ".ps1"],
     };
   }
 
   return {
     separator: path.sep,
-    delimiter: ':',
-    executableExtensions: ['']
+    delimiter: ":",
+    executableExtensions: [""],
   };
 }
 
@@ -87,14 +97,14 @@ export function getPathConfig(): PathConfig {
  * Get the path separator for environment variables
  */
 export function getPathDelimiter(): string {
-  return isWindows() ? ';' : ':';
+  return isWindows() ? ";" : ":";
 }
 
 /**
  * Get the default file extension for executables
  */
 export function getExecutableExtension(): string {
-  return isWindows() ? '.exe' : '';
+  return isWindows() ? ".exe" : "";
 }
 
 /**
@@ -120,43 +130,29 @@ export function getBinaryDirectories(): BinaryDirectories {
   if (isWindows()) {
     return {
       user: [
-        path.join(homeDir, 'AppData', 'Local', 'Programs'),
-        path.join(homeDir, 'AppData', 'Roaming', 'npm'),
-        path.join(homeDir, '.local', 'bin')
+        path.join(homeDir, "AppData", "Local", "Programs"),
+        path.join(homeDir, "AppData", "Roaming", "npm"),
+        path.join(homeDir, ".local", "bin"),
       ],
       system: [
-        process.env.ProgramFiles || 'C:\\Program Files',
-        process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
-        path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')
-      ]
+        process.env.ProgramFiles || "C:\\Program Files",
+        process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)",
+        path.join(process.env.SystemRoot || "C:\\Windows", "System32"),
+      ],
     };
   }
 
   if (isMacOS()) {
     return {
-      user: [
-        path.join(homeDir, '.local', 'bin'),
-        path.join(homeDir, 'bin')
-      ],
-      system: [
-        '/opt/homebrew/bin',
-        '/usr/local/bin',
-        '/usr/bin'
-      ]
+      user: [path.join(homeDir, ".local", "bin"), path.join(homeDir, "bin")],
+      system: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"],
     };
   }
 
   // Linux
   return {
-    user: [
-      path.join(homeDir, '.local', 'bin'),
-      path.join(homeDir, 'bin')
-    ],
-    system: [
-      '/usr/bin',
-      '/usr/local/bin',
-      '/snap/bin'
-    ]
+    user: [path.join(homeDir, ".local", "bin"), path.join(homeDir, "bin")],
+    system: ["/usr/bin", "/usr/local/bin", "/snap/bin"],
   };
 }
 
@@ -167,8 +163,8 @@ export function getHomebrewPath(): string | null {
   if (!isMacOS()) return null;
 
   const homebrewPaths = [
-    '/opt/homebrew/bin',  // Apple Silicon
-    '/usr/local/bin'      // Intel
+    "/opt/homebrew/bin", // Apple Silicon
+    "/usr/local/bin", // Intel
   ];
 
   for (const brewPath of homebrewPaths) {
@@ -202,22 +198,35 @@ function getWindowsShellConfig(preferredShell?: ShellType): ShellConfig {
   // We must use 'C:\\' or raw paths like 'C:\\Program Files' to get absolute paths
   const shellPaths: Record<ShellType, string[]> = {
     [ShellType.PowerShell]: [
-      path.join('C:\\Program Files', 'PowerShell', '7', 'pwsh.exe'),
-      path.join(homeDir, 'AppData', 'Local', 'Microsoft', 'WindowsApps', 'pwsh.exe'),
-      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+      path.join("C:\\Program Files", "PowerShell", "7", "pwsh.exe"),
+      path.join(
+        homeDir,
+        "AppData",
+        "Local",
+        "Microsoft",
+        "WindowsApps",
+        "pwsh.exe",
+      ),
+      path.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
+      ),
     ],
     [ShellType.CMD]: [
-      path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe')
+      path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe"),
     ],
     [ShellType.Bash]: [
-      path.join('C:\\Program Files', 'Git', 'bin', 'bash.exe'),
-      path.join('C:\\Program Files (x86)', 'Git', 'bin', 'bash.exe'),
-      path.join('C:\\msys64', 'usr', 'bin', 'bash.exe'),
-      path.join('C:\\cygwin64', 'bin', 'bash.exe')
+      path.join("C:\\Program Files", "Git", "bin", "bash.exe"),
+      path.join("C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+      path.join("C:\\msys64", "usr", "bin", "bash.exe"),
+      path.join("C:\\cygwin64", "bin", "bash.exe"),
     ],
     [ShellType.Zsh]: [],
     [ShellType.Fish]: [],
-    [ShellType.Unknown]: []
+    [ShellType.Unknown]: [],
   };
 
   const shellType = preferredShell || ShellType.PowerShell;
@@ -227,17 +236,19 @@ function getWindowsShellConfig(preferredShell?: ShellType): ShellConfig {
     if (existsSync(shellPath)) {
       return {
         executable: shellPath,
-        args: shellType === ShellType.Bash ? ['--login'] : [],
-        env: {}
+        args: shellType === ShellType.Bash ? ["--login"] : [],
+        env: {},
       };
     }
   }
 
   // Fallback to default CMD
   return {
-    executable: process.env.ComSpec || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe'),
+    executable:
+      process.env.ComSpec ||
+      path.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe"),
     args: [],
-    env: {}
+    env: {},
   };
 }
 
@@ -245,12 +256,12 @@ function getWindowsShellConfig(preferredShell?: ShellType): ShellConfig {
  * Get Unix shell configuration
  */
 function getUnixShellConfig(_preferredShell?: ShellType): ShellConfig {
-  const shellPath = process.env.SHELL || '/bin/zsh';
+  const shellPath = process.env.SHELL || "/bin/zsh";
 
   return {
     executable: shellPath,
-    args: ['-l'],
-    env: {}
+    args: ["-l"],
+    env: {},
   };
 }
 
@@ -263,21 +274,21 @@ export function requiresShell(command: string): boolean {
   if (!isWindows()) return false;
 
   const ext = path.extname(command).toLowerCase();
-  return ['.cmd', '.bat', '.ps1'].includes(ext);
+  return [".cmd", ".bat", ".ps1"].includes(ext);
 }
 
 /**
  * Get the npm command name for the current platform
  */
 export function getNpmCommand(): string {
-  return isWindows() ? 'npm.cmd' : 'npm';
+  return isWindows() ? "npm.cmd" : "npm";
 }
 
 /**
  * Get the npx command name for the current platform
  */
 export function getNpxCommand(): string {
-  return isWindows() ? 'npx.cmd' : 'npx';
+  return isWindows() ? "npx.cmd" : "npx";
 }
 
 /**
@@ -292,11 +303,11 @@ export function isSecurePath(candidatePath: string): boolean {
 
   // Security validation: reject paths with dangerous patterns
   const dangerousPatterns = [
-    /[;&|`${}[\]<>!"^]/,        // Shell metacharacters
-    /%[^%]+%/,                   // Windows environment variable expansion
-    /\.\.\//,                    // Unix directory traversal
-    /\.\.\\/,                    // Windows directory traversal
-    /[\r\n\x00]/                 // Newlines (command injection), null bytes (path truncation)
+    /[;&|`${}[\]<>!"^]/, // Shell metacharacters
+    /%[^%]+%/, // Windows environment variable expansion
+    /\.\.\//, // Unix directory traversal
+    /\.\.\\/, // Windows directory traversal
+    /[\r\n\x00]/, // Newlines (command injection), null bytes (path truncation)
   ];
 
   for (const pattern of dangerousPatterns) {
@@ -356,13 +367,13 @@ export function getEnvVar(name: string): string | undefined {
  */
 export function findExecutable(
   name: string,
-  additionalPaths: string[] = []
+  additionalPaths: string[] = [],
 ): string | null {
   const config = getPathConfig();
   const searchPaths: string[] = [];
 
   // Add PATH environment
-  const pathEnv = getEnvVar('PATH') || '';
+  const pathEnv = getEnvVar("PATH") || "";
   searchPaths.push(...pathEnv.split(config.delimiter).filter(Boolean));
 
   // Add platform-specific directories
@@ -392,11 +403,12 @@ export function findExecutable(
  */
 export function getPlatformDescription(): string {
   const currentOS = getCurrentOS();
-  const osName = {
-    [OS.Windows]: 'Windows',
-    [OS.macOS]: 'macOS',
-    [OS.Linux]: 'Linux'
-  }[currentOS] || process.platform;
+  const osName =
+    {
+      [OS.Windows]: "Windows",
+      [OS.macOS]: "macOS",
+      [OS.Linux]: "Linux",
+    }[currentOS] || process.platform;
 
   const arch = os.arch();
   return `${osName} (${arch})`;
@@ -428,12 +440,12 @@ export interface KillProcessOptions {
  */
 export function killProcessGracefully(
   childProcess: ChildProcess,
-  options: KillProcessOptions = {}
+  options: KillProcessOptions = {},
 ): void {
   const {
     timeoutMs = GRACEFUL_KILL_TIMEOUT_MS,
-    debugPrefix = '[ProcessKill]',
-    debug = false
+    debugPrefix = "[ProcessKill]",
+    debug = false,
   } = options;
 
   const pid = childProcess.pid;
@@ -453,24 +465,26 @@ export function killProcessGracefully(
     }
   };
 
-  if (typeof childProcess.once === 'function') {
-    childProcess.once('exit', cleanup);
-    childProcess.once('error', cleanup);  // Also cleanup on error
+  if (typeof childProcess.once === "function") {
+    childProcess.once("exit", cleanup);
+    childProcess.once("error", cleanup); // Also cleanup on error
   } else {
-    log('process.once unavailable, cannot track exit state');
+    log("process.once unavailable, cannot track exit state");
   }
 
   // Attempt graceful termination (may throw if process dead)
   try {
     if (isWindows()) {
-      childProcess.kill();  // Windows: no signal argument
+      childProcess.kill(); // Windows: no signal argument
     } else {
-      childProcess.kill('SIGTERM');
+      childProcess.kill("SIGTERM");
     }
-    log('Graceful kill signal sent');
+    log("Graceful kill signal sent");
   } catch (err) {
-    log('Graceful kill failed (process likely dead):',
-      err instanceof Error ? err.message : String(err));
+    log(
+      "Graceful kill failed (process likely dead):",
+      err instanceof Error ? err.message : String(err),
+    );
   }
 
   // ALWAYS schedule force-kill fallback OUTSIDE the try-catch
@@ -478,24 +492,26 @@ export function killProcessGracefully(
   if (pid) {
     forceKillTimer = setTimeout(() => {
       if (hasExited) {
-        log('Process already exited, skipping force kill');
+        log("Process already exited, skipping force kill");
         return;
       }
 
       try {
         if (isWindows()) {
-          log('Running taskkill for PID:', pid);
-          spawn(getTaskkillExePath(), ['/pid', pid.toString(), '/f', '/t'], {
-            stdio: 'ignore',
-            detached: true
+          log("Running taskkill for PID:", pid);
+          spawn(getTaskkillExePath(), ["/pid", pid.toString(), "/f", "/t"], {
+            stdio: "ignore",
+            detached: true,
           }).unref();
         } else if (!childProcess.killed) {
-          log('Sending SIGKILL to PID:', pid);
-          childProcess.kill('SIGKILL');
+          log("Sending SIGKILL to PID:", pid);
+          childProcess.kill("SIGKILL");
         }
       } catch (err) {
-        log('Force kill failed:',
-          err instanceof Error ? err.message : String(err));
+        log(
+          "Force kill failed:",
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }, timeoutMs);
 

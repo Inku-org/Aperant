@@ -5,17 +5,22 @@
  * Handles dev vs packaged Electron paths.
  */
 
-import { Parser, Language } from 'web-tree-sitter';
-import { join } from 'path';
+import { Parser, Language } from "web-tree-sitter";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+// ESM-compatible __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const GRAMMAR_FILES: Record<string, string> = {
-  typescript: 'tree-sitter-typescript.wasm',
-  tsx: 'tree-sitter-tsx.wasm',
-  python: 'tree-sitter-python.wasm',
-  rust: 'tree-sitter-rust.wasm',
-  go: 'tree-sitter-go.wasm',
-  java: 'tree-sitter-java.wasm',
-  javascript: 'tree-sitter-javascript.wasm',
+  typescript: "tree-sitter-typescript.wasm",
+  tsx: "tree-sitter-tsx.wasm",
+  python: "tree-sitter-python.wasm",
+  rust: "tree-sitter-rust.wasm",
+  go: "tree-sitter-go.wasm",
+  java: "tree-sitter-java.wasm",
+  javascript: "tree-sitter-javascript.wasm",
 };
 
 export class TreeSitterLoader {
@@ -34,14 +39,23 @@ export class TreeSitterLoader {
     // Lazy import to avoid issues in test environments
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { app } = require('electron') as typeof import('electron');
+      const { app } = require("electron") as typeof import("electron");
       if (app.isPackaged) {
-        return join(process.resourcesPath, 'grammars');
+        return join(process.resourcesPath, "grammars");
       }
     } catch {
       // Not in Electron (test environment) — fall through to dev path
     }
-    return join(__dirname, '..', '..', '..', '..', 'node_modules', 'tree-sitter-wasms', 'out');
+    return join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "..",
+      "node_modules",
+      "tree-sitter-wasms",
+      "out",
+    );
   }
 
   async initialize(): Promise<void> {
@@ -91,25 +105,33 @@ export class TreeSitterLoader {
    * Detect language from file extension.
    */
   static detectLanguage(filePath: string): string | null {
-    const ext = filePath.split('.').pop()?.toLowerCase();
+    const ext = filePath.split(".").pop()?.toLowerCase();
     const EXT_MAP: Record<string, string> = {
-      ts: 'typescript',
-      tsx: 'tsx',
-      js: 'javascript',
-      jsx: 'javascript',
-      mjs: 'javascript',
-      cjs: 'javascript',
-      py: 'python',
-      rs: 'rust',
-      go: 'go',
-      java: 'java',
+      ts: "typescript",
+      tsx: "tsx",
+      js: "javascript",
+      jsx: "javascript",
+      mjs: "javascript",
+      cjs: "javascript",
+      py: "python",
+      rs: "rust",
+      go: "go",
+      java: "java",
     };
-    return EXT_MAP[ext ?? ''] ?? null;
+    return EXT_MAP[ext ?? ""] ?? null;
   }
 
   /** Supported language extensions for file watching */
   static readonly SUPPORTED_EXTENSIONS = [
-    '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-    '.py', '.rs', '.go', '.java',
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".py",
+    ".rs",
+    ".go",
+    ".java",
   ];
 }

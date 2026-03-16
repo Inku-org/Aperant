@@ -10,29 +10,38 @@
  * - Production: process.resourcesPath/prompts/ (bundled into Electron resources)
  */
 
-import { readFileSync, existsSync, readFile as readFileAsync } from 'node:fs';
-import { join } from 'node:path';
-import { execSync } from 'node:child_process';
+import { readFileSync, existsSync, readFile as readFileAsync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
-import type { ProjectCapabilities, PromptContext, PromptValidationResult } from './types';
+// ESM-compatible __dirname (needed for Node's --experimental-transform-types in worker threads)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+import type {
+  ProjectCapabilities,
+  PromptContext,
+  PromptValidationResult,
+} from "./types";
 
 // =============================================================================
 // Expected prompt files (used for startup validation)
 // =============================================================================
 
 const EXPECTED_PROMPT_FILES = [
-  'planner.md',
-  'coder.md',
-  'coder_recovery.md',
-  'followup_planner.md',
-  'qa_reviewer.md',
-  'qa_fixer.md',
-  'spec_gatherer.md',
-  'spec_researcher.md',
-  'spec_writer.md',
-  'spec_critic.md',
-  'complexity_assessor.md',
-  'validation_fixer.md',
+  "planner.md",
+  "coder.md",
+  "coder_recovery.md",
+  "followup_planner.md",
+  "qa_reviewer.md",
+  "qa_fixer.md",
+  "spec_gatherer.md",
+  "spec_researcher.md",
+  "spec_writer.md",
+  "spec_critic.md",
+  "complexity_assessor.md",
+  "validation_fixer.md",
 ] as const;
 
 // =============================================================================
@@ -57,9 +66,9 @@ export function resolvePromptsDir(): string {
   try {
     // Dynamically import electron to avoid issues in worker threads
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { app } = require('electron') as typeof import('electron');
+    const { app } = require("electron") as typeof import("electron");
     if (app?.isPackaged) {
-      const prodPath = join(process.resourcesPath, 'prompts');
+      const prodPath = join(process.resourcesPath, "prompts");
       _resolvedPromptsDir = prodPath;
       return prodPath;
     }
@@ -70,22 +79,22 @@ export function resolvePromptsDir(): string {
   // Dev: traverse from __dirname up to find apps/desktop/prompts/
   const candidateBases = [
     // Worker thread: __dirname = out/main/ai/agent/ → traverse up to frontend root
-    join(__dirname, '..', '..', '..', '..', 'prompts'),
+    join(__dirname, "..", "..", "..", "..", "prompts"),
     // Worker thread in dev: __dirname = src/main/ai/agent/
-    join(__dirname, '..', '..', '..', 'prompts'),
+    join(__dirname, "..", "..", "..", "prompts"),
     // Direct: 2 levels up from src/main/ai/prompts/
-    join(__dirname, '..', '..', 'prompts'),
+    join(__dirname, "..", "..", "prompts"),
     // From out/main/ → ../../prompts
-    join(__dirname, '..', 'prompts'),
+    join(__dirname, "..", "prompts"),
     // Local prompts dir
-    join(__dirname, 'prompts'),
+    join(__dirname, "prompts"),
     // Repo root traversal: up to repo root, then apps/desktop/prompts/
-    join(__dirname, '..', '..', '..', '..', '..', 'apps', 'desktop', 'prompts'),
-    join(__dirname, '..', '..', '..', '..', 'apps', 'desktop', 'prompts'),
+    join(__dirname, "..", "..", "..", "..", "..", "apps", "desktop", "prompts"),
+    join(__dirname, "..", "..", "..", "..", "apps", "desktop", "prompts"),
   ];
 
   for (const candidate of candidateBases) {
-    if (existsSync(join(candidate, 'planner.md'))) {
+    if (existsSync(join(candidate, "planner.md"))) {
       _resolvedPromptsDir = candidate;
       return candidate;
     }
@@ -115,12 +124,12 @@ export function loadPrompt(promptName: string): string {
   if (!existsSync(promptPath)) {
     throw new Error(
       `Prompt file not found: ${promptPath}\n` +
-      `Prompts directory resolved to: ${promptsDir}\n` +
-      `Make sure apps/desktop/prompts/${promptName}.md exists.`
+        `Prompts directory resolved to: ${promptsDir}\n` +
+        `Make sure apps/desktop/prompts/${promptName}.md exists.`,
     );
   }
 
-  return readFileSync(promptPath, 'utf-8');
+  return readFileSync(promptPath, "utf-8");
 }
 
 /**
@@ -144,7 +153,7 @@ export function tryLoadPrompt(promptName: string): string | null {
 async function tryReadFile(filePath: string): Promise<string | null> {
   try {
     const content = await new Promise<string>((resolve, reject) => {
-      readFileAsync(filePath, 'utf-8', (err, data) => {
+      readFileAsync(filePath, "utf-8", (err, data) => {
         if (err) reject(err);
         else resolve(data);
       });
@@ -173,8 +182,10 @@ export interface ProjectInstructionsResult {
  * @param projectDir - Project root directory
  * @returns Content of the first found instruction file, or null
  */
-export async function loadProjectInstructions(projectDir: string): Promise<ProjectInstructionsResult | null> {
-  const candidates = ['AGENTS.md', 'agents.md', 'CLAUDE.md', 'claude.md'];
+export async function loadProjectInstructions(
+  projectDir: string,
+): Promise<ProjectInstructionsResult | null> {
+  const candidates = ["AGENTS.md", "agents.md", "CLAUDE.md", "claude.md"];
   for (const name of candidates) {
     const content = await tryReadFile(join(projectDir, name));
     if (content) return { content, source: name };
@@ -184,12 +195,12 @@ export async function loadProjectInstructions(projectDir: string): Promise<Proje
 
 /** @deprecated Use loadProjectInstructions() instead */
 export async function loadClaudeMd(projectDir: string): Promise<string | null> {
-  return tryReadFile(join(projectDir, 'CLAUDE.md'));
+  return tryReadFile(join(projectDir, "CLAUDE.md"));
 }
 
 /** @deprecated Use loadProjectInstructions() instead */
 export async function loadAgentsMd(projectDir: string): Promise<string | null> {
-  return tryReadFile(join(projectDir, 'agents.md'));
+  return tryReadFile(join(projectDir, "agents.md"));
 }
 
 // =============================================================================
@@ -209,7 +220,10 @@ export async function loadAgentsMd(projectDir: string): Promise<string | null> {
  * @param context - Dynamic context to inject
  * @returns Assembled prompt with all context prepended
  */
-export function injectContext(promptTemplate: string, context: PromptContext): string {
+export function injectContext(
+  promptTemplate: string,
+  context: PromptContext,
+): string {
   const sections: string[] = [];
 
   // 1. Spec location header
@@ -227,10 +241,10 @@ export function injectContext(promptTemplate: string, context: PromptContext): s
   if (context.humanInput) {
     sections.push(
       `## HUMAN INPUT (READ THIS FIRST!)\n\n` +
-      `The human has left you instructions. READ AND FOLLOW THESE CAREFULLY:\n\n` +
-      `${context.humanInput}\n\n` +
-      `After addressing this input, you may delete or clear the HUMAN_INPUT.md file.\n\n` +
-      `---\n\n`
+        `The human has left you instructions. READ AND FOLLOW THESE CAREFULLY:\n\n` +
+        `${context.humanInput}\n\n` +
+        `After addressing this input, you may delete or clear the HUMAN_INPUT.md file.\n\n` +
+        `---\n\n`,
     );
   }
 
@@ -238,22 +252,22 @@ export function injectContext(promptTemplate: string, context: PromptContext): s
   if (context.projectInstructions) {
     sections.push(
       `## PROJECT INSTRUCTIONS\n\n` +
-      `${context.projectInstructions}\n\n` +
-      `---\n\n`
+        `${context.projectInstructions}\n\n` +
+        `---\n\n`,
     );
   }
 
   // 5. Base prompt
   sections.push(promptTemplate);
 
-  return sections.join('');
+  return sections.join("");
 }
 
 /**
  * Build the SPEC LOCATION header section.
  */
 function buildSpecLocationHeader(context: PromptContext): string {
-  if (!context.specDir) return '';
+  if (!context.specDir) return "";
 
   return (
     `## SPEC LOCATION\n\n` +
@@ -281,46 +295,48 @@ function buildSpecLocationHeader(context: PromptContext): string {
  */
 export function getQaToolsSection(capabilities: ProjectCapabilities): string {
   const toolFiles = getMcpToolFilesForCapabilities(capabilities);
-  if (toolFiles.length === 0) return '';
+  if (toolFiles.length === 0) return "";
 
   const sections: string[] = [
-    '## PROJECT-SPECIFIC VALIDATION TOOLS\n\n' +
-    'The following validation tools are available based on your project type:\n\n'
+    "## PROJECT-SPECIFIC VALIDATION TOOLS\n\n" +
+      "The following validation tools are available based on your project type:\n\n",
   ];
 
   for (const toolFile of toolFiles) {
-    const content = tryLoadPrompt(toolFile.replace(/\.md$/, ''));
+    const content = tryLoadPrompt(toolFile.replace(/\.md$/, ""));
     if (content) {
       sections.push(content);
     }
   }
 
-  if (sections.length <= 1) return '';
+  if (sections.length <= 1) return "";
 
-  return sections.join('\n\n---\n\n') + '\n\n---\n';
+  return sections.join("\n\n---\n\n") + "\n\n---\n";
 }
 
 /**
  * Get MCP tool documentation file names for the given capabilities.
  * Mirrors get_mcp_tools_for_project() from Python.
  */
-function getMcpToolFilesForCapabilities(capabilities: ProjectCapabilities): string[] {
+function getMcpToolFilesForCapabilities(
+  capabilities: ProjectCapabilities,
+): string[] {
   const tools: string[] = [];
 
   if (capabilities.is_electron) {
-    tools.push('mcp_tools/electron_validation.md');
+    tools.push("mcp_tools/electron_validation.md");
   }
   if (capabilities.is_tauri) {
-    tools.push('mcp_tools/tauri_validation.md');
+    tools.push("mcp_tools/tauri_validation.md");
   }
   if (capabilities.is_web_frontend && !capabilities.is_electron) {
-    tools.push('mcp_tools/puppeteer_browser.md');
+    tools.push("mcp_tools/puppeteer_browser.md");
   }
   if (capabilities.has_database) {
-    tools.push('mcp_tools/database_validation.md');
+    tools.push("mcp_tools/database_validation.md");
   }
   if (capabilities.has_api) {
-    tools.push('mcp_tools/api_validation.md');
+    tools.push("mcp_tools/api_validation.md");
   }
 
   return tools;
@@ -341,10 +357,12 @@ function getMcpToolFilesForCapabilities(capabilities: ProjectCapabilities): stri
  */
 export function detectBaseBranch(specDir: string, projectDir: string): string {
   // 1. Check task_metadata.json
-  const metadataPath = join(specDir, 'task_metadata.json');
+  const metadataPath = join(specDir, "task_metadata.json");
   if (existsSync(metadataPath)) {
     try {
-      const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8')) as { baseBranch?: string };
+      const metadata = JSON.parse(readFileSync(metadataPath, "utf-8")) as {
+        baseBranch?: string;
+      };
       const branch = validateBranchName(metadata.baseBranch);
       if (branch) return branch;
     } catch {
@@ -358,7 +376,7 @@ export function detectBaseBranch(specDir: string, projectDir: string): string {
     try {
       execSync(`git rev-parse --verify ${envBranch}`, {
         cwd: projectDir,
-        stdio: 'pipe',
+        stdio: "pipe",
         timeout: 3000,
       });
       return envBranch;
@@ -368,11 +386,11 @@ export function detectBaseBranch(specDir: string, projectDir: string): string {
   }
 
   // 3. Auto-detect
-  for (const branch of ['main', 'master', 'develop']) {
+  for (const branch of ["main", "master", "develop"]) {
     try {
       execSync(`git rev-parse --verify ${branch}`, {
         cwd: projectDir,
-        stdio: 'pipe',
+        stdio: "pipe",
         timeout: 3000,
       });
       return branch;
@@ -382,14 +400,14 @@ export function detectBaseBranch(specDir: string, projectDir: string): string {
   }
 
   // 4. Fallback
-  return 'main';
+  return "main";
 }
 
 /**
  * Validate a git branch name for safety (mirrors Python _validate_branch_name).
  */
 function validateBranchName(branch: string | null | undefined): string | null {
-  if (!branch || typeof branch !== 'string') return null;
+  if (!branch || typeof branch !== "string") return null;
   const trimmed = branch.trim();
   if (!trimmed || trimmed.length > 255) return null;
   if (!/[a-zA-Z0-9]/.test(trimmed)) return null;
@@ -405,10 +423,13 @@ function validateBranchName(branch: string | null | undefined): string | null {
  * Load project_index.json from the project's .auto-claude directory.
  */
 export function loadProjectIndex(projectDir: string): Record<string, unknown> {
-  const indexPath = join(projectDir, '.auto-claude', 'project_index.json');
+  const indexPath = join(projectDir, ".auto-claude", "project_index.json");
   if (!existsSync(indexPath)) return {};
   try {
-    return JSON.parse(readFileSync(indexPath, 'utf-8')) as Record<string, unknown>;
+    return JSON.parse(readFileSync(indexPath, "utf-8")) as Record<
+      string,
+      unknown
+    >;
   } catch {
     return {};
   }
@@ -418,7 +439,9 @@ export function loadProjectIndex(projectDir: string): Record<string, unknown> {
  * Detect project capabilities from project_index.json.
  * Mirrors detect_project_capabilities() from Python.
  */
-export function detectProjectCapabilities(projectIndex: Record<string, unknown>): ProjectCapabilities {
+export function detectProjectCapabilities(
+  projectIndex: Record<string, unknown>,
+): ProjectCapabilities {
   const capabilities: ProjectCapabilities = {
     is_electron: false,
     is_tauri: false,
@@ -434,7 +457,7 @@ export function detectProjectCapabilities(projectIndex: Record<string, unknown>)
   const services = projectIndex.services;
   let serviceList: unknown[] = [];
 
-  if (typeof services === 'object' && services !== null) {
+  if (typeof services === "object" && services !== null) {
     if (Array.isArray(services)) {
       serviceList = services;
     } else {
@@ -443,59 +466,75 @@ export function detectProjectCapabilities(projectIndex: Record<string, unknown>)
   }
 
   for (const svc of serviceList) {
-    if (!svc || typeof svc !== 'object') continue;
+    if (!svc || typeof svc !== "object") continue;
     const service = svc as Record<string, unknown>;
 
     // Collect all dependencies
     const deps = new Set<string>();
-    for (const dep of ((service.dependencies as string[]) ?? [])) {
-      if (typeof dep === 'string') deps.add(dep.toLowerCase());
+    for (const dep of (service.dependencies as string[]) ?? []) {
+      if (typeof dep === "string") deps.add(dep.toLowerCase());
     }
-    for (const dep of ((service.dev_dependencies as string[]) ?? [])) {
-      if (typeof dep === 'string') deps.add(dep.toLowerCase());
+    for (const dep of (service.dev_dependencies as string[]) ?? []) {
+      if (typeof dep === "string") deps.add(dep.toLowerCase());
     }
 
-    const framework = String(service.framework ?? '').toLowerCase();
+    const framework = String(service.framework ?? "").toLowerCase();
 
     // Desktop
-    if (deps.has('electron') || [...deps].some((d) => d.startsWith('@electron'))) {
+    if (
+      deps.has("electron") ||
+      [...deps].some((d) => d.startsWith("@electron"))
+    ) {
       capabilities.is_electron = true;
     }
-    if (deps.has('@tauri-apps/api') || deps.has('tauri')) {
+    if (deps.has("@tauri-apps/api") || deps.has("tauri")) {
       capabilities.is_tauri = true;
     }
 
     // Mobile
-    if (deps.has('expo')) capabilities.is_expo = true;
-    if (deps.has('react-native')) capabilities.is_react_native = true;
+    if (deps.has("expo")) capabilities.is_expo = true;
+    if (deps.has("react-native")) capabilities.is_react_native = true;
 
     // Web frontend
-    const webFrameworks = new Set(['react', 'vue', 'svelte', 'angular', 'solid']);
+    const webFrameworks = new Set([
+      "react",
+      "vue",
+      "svelte",
+      "angular",
+      "solid",
+    ]);
     if (webFrameworks.has(framework)) capabilities.is_web_frontend = true;
 
-    if (['nextjs', 'next.js', 'next'].includes(framework) || deps.has('next')) {
+    if (["nextjs", "next.js", "next"].includes(framework) || deps.has("next")) {
       capabilities.is_nextjs = true;
       capabilities.is_web_frontend = true;
     }
-    if (['nuxt', 'nuxt.js'].includes(framework) || deps.has('nuxt')) {
+    if (["nuxt", "nuxt.js"].includes(framework) || deps.has("nuxt")) {
       capabilities.is_nuxt = true;
       capabilities.is_web_frontend = true;
     }
-    if (deps.has('vite') && !capabilities.is_electron) {
+    if (deps.has("vite") && !capabilities.is_electron) {
       capabilities.is_web_frontend = true;
     }
 
     // API
     const apiInfo = service.api as { routes?: unknown } | null | undefined;
-    if (apiInfo && typeof apiInfo === 'object' && apiInfo.routes) {
+    if (apiInfo && typeof apiInfo === "object" && apiInfo.routes) {
       capabilities.has_api = true;
     }
 
     // Database
     if (service.database) capabilities.has_database = true;
     const dbDeps = new Set([
-      'prisma', 'drizzle-orm', 'typeorm', 'sequelize', 'mongoose',
-      'sqlalchemy', 'alembic', 'django', 'peewee',
+      "prisma",
+      "drizzle-orm",
+      "typeorm",
+      "sequelize",
+      "mongoose",
+      "sqlalchemy",
+      "alembic",
+      "django",
+      "peewee",
     ]);
     for (const dep of deps) {
       if (dbDeps.has(dep)) {

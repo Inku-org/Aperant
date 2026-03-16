@@ -11,7 +11,7 @@ import {
 } from "../claude-profile-manager";
 import type { ClaudeProfileManager } from "../claude-profile-manager";
 import { getOperationRegistry } from "../claude-profile/operation-registry";
-import {
+import type {
   SpecCreationMetadata,
   TaskExecutionOptions,
   RoadmapConfig,
