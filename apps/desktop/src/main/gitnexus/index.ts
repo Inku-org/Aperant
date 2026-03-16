@@ -53,12 +53,16 @@ export function reindexInBackground(projectPath: string): boolean {
       detached: true,
     });
 
+    // Handle spawn errors (e.g., ENOENT when gitnexus isn't installed)
+    // Without this, the 'error' event is unhandled and crashes the process.
+    child.on("error", () => {
+      // Silently ignore — gitnexus is optional
+    });
+
     // Unref so the Electron process doesn't wait for it
     child.unref();
 
-    console.log(
-      `[GitNexus] Background re-index started for: ${projectPath}`,
-    );
+    console.log(`[GitNexus] Background re-index started for: ${projectPath}`);
     return true;
   } catch {
     console.log("[GitNexus] Failed to spawn gitnexus analyze");
