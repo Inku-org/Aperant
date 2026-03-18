@@ -24,7 +24,7 @@ import { resolveAuth, resolveAuthFromQueue } from "../ai/auth/resolver";
 import { reindexIfNeeded } from "../gitnexus";
 import { resolveModelId } from "../ai/config/phase-config";
 import { detectProviderFromModel } from "../ai/providers/factory";
-import { resolveModelEquivalent } from "../../shared/constants/models";
+import { resolveModelEquivalent, PROVIDER_PRESET_DEFINITIONS } from "../../shared/constants/models";
 import type { BuiltinProvider } from "../../shared/types/provider-account";
 import type {
   AgentExecutorConfig,
@@ -288,6 +288,40 @@ export class AgentManager extends EventEmitter {
    * Check if any provider account is configured (API key or OAuth).
    * Used to bypass the legacy hasValidAuth() check for non-Anthropic providers.
    */
+  /**
+   * Resolve the default model from the active agent profile settings.
+   * Reads selectedAgentProfile + provider presets to determine the primary model.
+   */
+  private resolveDefaultModelFromProfile(): string | null {
+    try {
+      const settings = readSettingsFile();
+      if (!settings) return null;
+
+      // Determine active provider
+      const priorityOrder = (settings.globalPriorityOrder as string[] | undefined) ?? [];
+      const accounts = (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
+      let activeProvider: string | undefined;
+      for (const accountId of priorityOrder) {
+        const account = accounts.find((a: ProviderAccount) => a.id === accountId);
+        if (account?.provider) { activeProvider = account.provider; break; }
+      }
+      if (!activeProvider) return null;
+
+      // Check per-provider agent profile first
+      const providerConfig = (settings.providerAgentConfig as Record<string, Record<string, unknown>> | undefined)?.[activeProvider];
+      const profileId = (providerConfig?.selectedAgentProfile as string) ?? (settings.selectedAgentProfile as string) ?? 'auto';
+
+      // Look up preset for this provider + profile
+      const presets = PROVIDER_PRESET_DEFINITIONS[activeProvider as keyof typeof PROVIDER_PRESET_DEFINITIONS];
+      const preset = presets?.[profileId];
+      if (preset?.primaryModel) return preset.primaryModel;
+
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   private hasAnyProviderAccount(): boolean {
     const settings = readSettingsFile();
     const accounts =
@@ -573,9 +607,11 @@ export class AgentManager extends EventEmitter {
     }
 
     // Resolve model and thinking level for the spec phase
+    // Read the active agent profile to determine default model
+    const agentProfileModel = this.resolveDefaultModelFromProfile();
     const specModelShorthand = metadata?.phaseModels?.spec
       ? metadata.phaseModels.spec
-      : (metadata?.model ?? "sonnet");
+      : (metadata?.model ?? agentProfileModel ?? "sonnet");
 
     // Determine the preferred provider (from metadata or task_metadata.json)
     const preferredProvider =

@@ -33,10 +33,12 @@ export function createWsDispatcher(compat: IpcCompat): WsDispatcher {
       if (msg.type === 'invoke') {
         const { id, channel, args } = msg as InvokeMessage;
         if (!id || !channel) return;
+        console.log(`[ws-dispatch] invoke: ${channel}`);
         try {
           const result = await compat.dispatch(channel, args ?? []);
           ws.send(JSON.stringify({ type: 'response', id, data: result }));
         } catch (err) {
+          console.error(`[ws-dispatch] invoke error on ${channel}:`, err instanceof Error ? err.message : err);
           ws.send(JSON.stringify({
             type: 'response',
             id,
@@ -46,6 +48,7 @@ export function createWsDispatcher(compat: IpcCompat): WsDispatcher {
       } else if (msg.type === 'send') {
         const { channel, args } = msg as SendMessage;
         if (!channel) return;
+        console.log(`[ws-dispatch] send: ${channel}`);
         compat.dispatchFireAndForget(channel, args ?? []);
       }
     },

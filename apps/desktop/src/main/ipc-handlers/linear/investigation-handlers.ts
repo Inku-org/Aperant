@@ -191,7 +191,7 @@ async function analyzeIssueWithAI(
   gitNexusContext?: GitNexusResult,
 ): Promise<AnalysisResult> {
   const featureSettings = getActiveProviderFeatureSettings("naming");
-  const modelShorthand = featureSettings.model || "haiku";
+  const modelShorthand = "haiku";
   console.log('[Linear Investigation] Feature settings:', JSON.stringify(featureSettings));
   console.log('[Linear Investigation] Using model shorthand:', modelShorthand);
 

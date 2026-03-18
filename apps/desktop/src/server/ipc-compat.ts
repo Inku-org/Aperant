@@ -81,12 +81,24 @@ export function createIpcCompat(): IpcCompat {
     dispatchFireAndForget(channel: string, args: unknown[]): void {
       const handler = onHandlers.get(channel);
       if (handler) {
-        handler(fakeEvent, ...args);
+        try {
+          const result = handler(fakeEvent, ...args);
+          // If the handler returns a promise, catch errors
+          if (result && typeof (result as any).catch === 'function') {
+            (result as any).catch((err: unknown) => {
+              console.error(`[ipc-compat] Fire-and-forget handler error on ${channel}:`, err instanceof Error ? err.message : err);
+            });
+          }
+        } catch (err) {
+          console.error(`[ipc-compat] Fire-and-forget handler error on ${channel}:`, err instanceof Error ? err.message : err);
+        }
       }
       // Also check handle handlers for channels registered with handle but called via send
       const handleHandler = handleHandlers.get(channel);
       if (handleHandler) {
-        handleHandler(fakeEvent, ...args).catch(() => {});
+        handleHandler(fakeEvent, ...args).catch((err) => {
+          console.error(`[ipc-compat] Fire-and-forget (handle) error on ${channel}:`, err instanceof Error ? err.message : err);
+        });
       }
     },
 
