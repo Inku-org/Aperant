@@ -48,6 +48,10 @@
     "terminal-fonts": {
       "title": "Terminal Fonts",
       "description": "Customize terminal font appearance"
+    },
+    "automation": {
+      "title": "Automation",
+      "description": "Configure automatic task behaviors"
     }
   },
   "apiProfiles": {
@@ -1184,5 +1188,12 @@
         "description": "An error occurred while saving your provider configuration."
       }
     }
+  },
+  "automation": {
+    "autoStartLowImpact": "Auto-start low-impact tasks",
+    "autoStartLowImpactDescription": "Automatically start task execution for Linear issues with a low impact score after spec creation completes.",
+    "impactThreshold": "Impact score threshold",
+    "impactThresholdDescription": "Tasks with an impact score at or below this value will auto-start. Scale: 0 (trivial) to 100 (critical infrastructure).",
+    "linearOnly": "Applies to Linear issues only"
   }
 }

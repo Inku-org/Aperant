@@ -48,6 +48,10 @@
     "terminal-fonts": {
       "title": "Polices de terminal",
       "description": "Personnaliser l'apparence des polices de terminal"
+    },
+    "automation": {
+      "title": "Automatisation",
+      "description": "Configurer les comportements automatiques des tâches"
     }
   },
   "apiProfiles": {
@@ -1184,5 +1188,12 @@
         "description": "Une erreur s'est produite lors de l'enregistrement de la configuration du fournisseur."
       }
     }
+  },
+  "automation": {
+    "autoStartLowImpact": "Démarrage auto des tâches à faible impact",
+    "autoStartLowImpactDescription": "Démarrer automatiquement l'exécution des tâches Linear ayant un faible score d'impact après la création de la spécification.",
+    "impactThreshold": "Seuil du score d'impact",
+    "impactThresholdDescription": "Les tâches avec un score d'impact inférieur ou égal à cette valeur démarreront automatiquement. Échelle : 0 (trivial) à 100 (infrastructure critique).",
+    "linearOnly": "S'applique uniquement aux issues Linear"
   }
 }
