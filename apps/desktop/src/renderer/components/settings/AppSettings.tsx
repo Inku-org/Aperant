@@ -19,7 +19,8 @@ import {
   Code,
   Bug,
   Terminal,
-  Users
+  Users,
+  PlayCircle
 } from 'lucide-react';
 
 // GitLab icon component (lucide-react doesn't have one)
@@ -51,6 +52,7 @@ import { GeneralSettings } from './GeneralSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { DevToolsSettings } from './DevToolsSettings';
 import { DebugSettings } from './DebugSettings';
+import { AutomationSettings } from './AutomationSettings';
 import { TerminalFontSettings } from './terminal-font-settings/TerminalFontSettings';
 import { AccountSettings } from './AccountSettings';
 import { ProjectSelector } from './ProjectSelector';
@@ -67,7 +69,7 @@ interface AppSettingsDialogProps {
 }
 
 // App-level settings sections
-export type AppSection = 'appearance' | 'display' | 'language' | 'devtools' | 'terminal-fonts' | 'agent' | 'paths' | 'integrations' | 'accounts' | 'api-profiles' | 'updates' | 'notifications' | 'debug';
+export type AppSection = 'appearance' | 'display' | 'language' | 'devtools' | 'terminal-fonts' | 'agent' | 'paths' | 'integrations' | 'accounts' | 'api-profiles' | 'updates' | 'notifications' | 'automation' | 'debug';
 
 interface NavItemConfig<T extends string> {
   id: T;
@@ -85,6 +87,7 @@ const appNavItemsConfig: NavItemConfig<AppSection>[] = [
   { id: 'accounts', icon: Users },
   { id: 'updates', icon: Package },
   { id: 'notifications', icon: Bell },
+  { id: 'automation', icon: PlayCircle },
   { id: 'debug', icon: Bug }
 ];
 
@@ -200,6 +203,8 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         return <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="updates" version={version} />;
       case 'notifications':
         return <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="notifications" version={version} />;
+      case 'automation':
+        return <AutomationSettings settings={settings} onSettingsChange={setSettings} />;
       case 'debug':
         return <DebugSettings />;
       default:
