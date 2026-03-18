@@ -9,6 +9,7 @@ import { existsSync } from "fs";
 import path from "path";
 import { generateText } from "ai";
 import { IPC_CHANNELS } from "../../../shared/constants";
+import { DEFAULT_APP_SETTINGS } from "../../../shared/constants/config";
 import type {
   LinearInvestigationResult,
   LinearInvestigationStatus,
@@ -16,6 +17,7 @@ import type {
 } from "../../../shared/types";
 import { projectStore } from "../../project-store";
 import { AgentManager } from "../../agent";
+import { readSettingsFile } from "../../settings-utils";
 import { createSimpleClient } from "../../ai/client/factory";
 import { getActiveProviderFeatureSettings } from "../feature-settings-helper";
 import { getLinearApiKey, linearGraphQL } from "./utils";
@@ -189,13 +191,16 @@ async function analyzeIssueWithAI(
   gitNexusContext?: GitNexusResult,
 ): Promise<AnalysisResult> {
   const featureSettings = getActiveProviderFeatureSettings("naming");
+  const modelShorthand = featureSettings.model || "haiku";
+  console.log('[Linear Investigation] Feature settings:', JSON.stringify(featureSettings));
+  console.log('[Linear Investigation] Using model shorthand:', modelShorthand);
 
   const client = await createSimpleClient({
     systemPrompt: INVESTIGATION_SYSTEM_PROMPT,
-    modelShorthand:
-      featureSettings.model === "haiku" ? "sonnet" : featureSettings.model,
+    modelShorthand,
     thinkingLevel: "low",
   });
+  console.log('[Linear Investigation] Client created, model:', client.model?.modelId ?? 'unknown');
 
   // Build prompt with optional GitNexus context
   let prompt = `Analyze this issue and provide your structured JSON analysis:\n\n${issueContext}`;
@@ -216,6 +221,7 @@ async function analyzeIssueWithAI(
     model: client.model,
     system: client.systemPrompt,
     prompt,
+    maxOutputTokens: 4096,
   });
 
   const text = result.text.trim();
@@ -414,7 +420,7 @@ function sendComplete(
  * Investigate a Linear issue and create a task
  */
 function registerInvestigateIssue(
-  _agentManager: AgentManager,
+  agentManager: AgentManager,
   getMainWindow: () => BrowserWindow | null,
 ): void {
   ipcMain.on(
@@ -439,7 +445,6 @@ function registerInvestigateIssue(
         sendError(mainWindow, projectId, "No Linear API key configured");
         return;
       }
-
       try {
         // Phase 1: Fetching issue details
         sendProgress(mainWindow, projectId, {
@@ -679,7 +684,43 @@ ${aiAnalysis.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`;
         });
 
         sendComplete(mainWindow, projectId, investigationResult);
+
+        // Auto-start: if impact score is at or below threshold, start spec creation automatically
+        if (aiAnalysis.impactScore != null) {
+          try {
+            const rawSettings = readSettingsFile();
+            const settings = { ...DEFAULT_APP_SETTINGS, ...rawSettings };
+            if (settings.autoStartLowImpact) {
+              const threshold = Math.max(0, Math.min(100, settings.autoStartImpactThreshold ?? 20));
+              if (aiAnalysis.impactScore <= threshold) {
+                console.warn(`[Linear Investigation] Impact score ${aiAnalysis.impactScore} <= threshold ${threshold} — auto-starting spec creation for ${specData.specId}`);
+                agentManager.startSpecCreation(
+                  specData.specId,
+                  project.path,
+                  specData.taskDescription,
+                  specData.specDir,
+                  specData.metadata,
+                  undefined,  // baseBranch (already in metadata)
+                  projectId,
+                );
+              }
+            }
+          } catch (autoStartErr) {
+            console.error('[Linear Investigation] Auto-start check failed:', autoStartErr);
+          }
+        }
       } catch (error) {
+        console.error('[Linear Investigation] Error:', error instanceof Error ? error.message : error);
+        // Dump all enumerable and non-enumerable properties
+        const err = error as any;
+        const allKeys = Object.getOwnPropertyNames(err);
+        for (const key of allKeys) {
+          if (key === 'stack') continue;
+          try {
+            const val = err[key];
+            console.error(`[Linear Investigation] err.${key}:`, typeof val === 'object' ? JSON.stringify(val) : val);
+          } catch { /* skip */ }
+        }
         sendError(
           mainWindow,
           projectId,
