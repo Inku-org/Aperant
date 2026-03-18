@@ -37,6 +37,9 @@ import { findTaskWorktree } from "../worktree-paths";
 import { readSettingsFile } from "../settings-utils";
 import type { ProviderAccount } from "../../shared/types/provider-account";
 import { tryLoadPrompt } from "../ai/prompts/prompt-loader";
+import { getSyncEngine } from "../ipc-handlers/linear/sync-handlers";
+import { formatAgentProgress } from "../linear-sync";
+import { mapTaskStatusToLinearStateType } from "../linear-sync/status-mapping";
 
 /**
  * Main AgentManager - orchestrates agent process lifecycle
@@ -155,6 +158,123 @@ export class AgentManager extends EventEmitter {
         }, 1000); // Delay to allow restart logic to run first
       },
     );
+
+    // Linear sync: push status changes on task exit
+    this.on(
+      "exit",
+      (
+        taskId: string,
+        code: number | null,
+        _processType?: string,
+        _projectId?: string,
+      ) => {
+        this.enqueueLinearStatusChange(taskId, code === 0 ? "done" : "error");
+      },
+    );
+
+    // Linear sync: push progress comments during execution
+    this.on(
+      "execution-progress",
+      (
+        taskId: string,
+        progress: import("./types").ExecutionProgressData,
+        _projectId?: string,
+      ) => {
+        this.enqueueLinearProgressComment(taskId, progress);
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Linear sync helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Read task_metadata.json for a given taskId (spec folder name) and return
+   * the Linear issue info if present.
+   */
+  private readLinearMetadata(
+    taskId: string,
+  ): { linearIssueId: string; linearIdentifier: string; projectId: string } | null {
+    const context = this.taskExecutionContext.get(taskId);
+    if (!context) return null;
+
+    const project = projectStore.getProject(context.projectId ?? "");
+    if (!project) return null;
+
+    const specsBaseDir = getSpecsDir(project.autoBuildPath);
+    const metadataPath = path.join(
+      project.path,
+      specsBaseDir,
+      context.specId,
+      "task_metadata.json",
+    );
+
+    if (!existsSync(metadataPath)) return null;
+
+    try {
+      const meta = JSON.parse(readFileSync(metadataPath, "utf-8"));
+      if (meta.sourceType !== "linear" || !meta.linearIssueId) return null;
+      return {
+        linearIssueId: meta.linearIssueId,
+        linearIdentifier: meta.linearIdentifier ?? "",
+        projectId: project.id,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Enqueue a status_change outbound event to the Linear sync engine
+   * when a task exits.
+   */
+  private enqueueLinearStatusChange(taskId: string, status: string): void {
+    const meta = this.readLinearMetadata(taskId);
+    if (!meta) return;
+
+    const engine = getSyncEngine(meta.projectId);
+    if (!engine || !engine.isRunning) return;
+
+    const targetState = mapTaskStatusToLinearStateType(status);
+    if (!targetState) return;
+
+    engine.enqueueOutbound({
+      type: "status_change",
+      issueId: meta.linearIssueId,
+      issueIdentifier: meta.linearIdentifier,
+      targetState,
+    });
+  }
+
+  /**
+   * Enqueue an agent_progress outbound comment to the Linear sync engine
+   * during task execution.
+   */
+  private enqueueLinearProgressComment(
+    taskId: string,
+    progress: import("./types").ExecutionProgressData,
+  ): void {
+    const meta = this.readLinearMetadata(taskId);
+    if (!meta) return;
+
+    const engine = getSyncEngine(meta.projectId);
+    if (!engine || !engine.isRunning) return;
+
+    const body = formatAgentProgress(
+      meta.linearIdentifier,
+      progress.phase,
+      progress.message ?? "",
+      undefined,
+      undefined,
+    );
+
+    engine.enqueueOutbound({
+      type: "agent_progress",
+      issueId: meta.linearIssueId,
+      issueIdentifier: meta.linearIdentifier,
+      body,
+    });
   }
 
   /**
