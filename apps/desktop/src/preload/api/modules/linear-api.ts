@@ -45,6 +45,7 @@ export interface LinearAPI {
     projectId: string,
     issueId: string,
     selectedCommentIds?: string[],
+    baseBranch?: string,
   ) => void;
   syncLinearIssueStatus: (
     projectId: string,
@@ -117,12 +118,14 @@ export const createLinearAPI = (): LinearAPI => ({
     projectId: string,
     issueId: string,
     selectedCommentIds?: string[],
+    baseBranch?: string,
   ): void =>
     sendIpc(
       IPC_CHANNELS.LINEAR_INVESTIGATE_ISSUE,
       projectId,
       issueId,
       selectedCommentIds,
+      baseBranch,
     ),
 
   syncLinearIssueStatus: (

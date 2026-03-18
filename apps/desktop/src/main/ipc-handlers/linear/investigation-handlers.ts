@@ -430,6 +430,7 @@ function registerInvestigateIssue(
       projectId: string,
       issueId: string,
       selectedCommentIds?: string[],
+      baseBranch?: string,
     ) => {
       const mainWindow = getMainWindow();
       if (!mainWindow) return;
@@ -620,7 +621,7 @@ ${aiAnalysis.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`;
           enrichedDescription,
           issue.url,
           labels,
-          project.settings?.mainBranch,
+          baseBranch || project.settings?.mainBranch,
           aiAnalysis.impactScore,
         );
 
