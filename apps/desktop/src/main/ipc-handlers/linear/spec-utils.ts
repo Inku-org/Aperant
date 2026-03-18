@@ -98,7 +98,8 @@ export async function createSpecForLinearIssue(
   taskDescription: string,
   linearUrl: string,
   labels: string[] = [],
-  baseBranch?: string
+  baseBranch?: string,
+  impactScore?: number
 ): Promise<SpecCreationData> {
   const specsBaseDir = getSpecsDir(project.autoBuildPath);
   const specsDir = path.join(project.path, specsBaseDir);
@@ -168,7 +169,8 @@ export async function createSpecForLinearIssue(
       linearUrl: safeLinearUrl,
       category,
       // Store baseBranch for worktree creation and QA comparison
-      ...(baseBranch && { baseBranch })
+      ...(baseBranch && { baseBranch }),
+      ...(impactScore != null && { impactScore })
     };
     // lgtm[js/http-to-file-access] - specDir is controlled, slugifiedTitle sanitizes input
     writeFileSync(

@@ -616,6 +616,7 @@ ${aiAnalysis.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`;
           issue.url,
           labels,
           project.settings?.mainBranch,
+          aiAnalysis.impactScore,
         );
 
         // Phase 3: Creating task
