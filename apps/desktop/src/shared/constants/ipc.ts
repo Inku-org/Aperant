@@ -262,6 +262,11 @@ export const IPC_CHANNELS = {
   LINEAR_INVESTIGATION_ERROR: "linear:investigationError",
   LINEAR_SYNC_ISSUE_STATUS: "linear:syncIssueStatus",
   LINEAR_SYNC_STATUS_UPDATE: "linear:syncStatusUpdate",
+  LINEAR_START_SYNC: "linear:startSync",
+  LINEAR_STOP_SYNC: "linear:stopSync",
+  LINEAR_GET_SYNC_STATUS: "linear:getSyncStatus",
+  LINEAR_SYNC_ENGINE_EVENT: "linear:syncEngineEvent",
+  LINEAR_SYNC_COMMENT_UPDATE: "linear:syncCommentUpdate",
 
   // GitHub integration
   GITHUB_GET_REPOSITORIES: "github:getRepositories",
