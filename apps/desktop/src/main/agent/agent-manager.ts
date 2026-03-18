@@ -1439,8 +1439,9 @@ export class AgentManager extends EventEmitter {
       // Fall through to default
     }
 
-    // Default: resolve 'sonnet' (Anthropic fallback)
-    return resolveModelId("sonnet");
+    // Default: check agent profile, then fall back to 'sonnet'
+    const profileModel = this.resolveDefaultModelFromProfile();
+    return resolveModelId(profileModel ?? "sonnet");
   }
 
   /**

@@ -484,14 +484,6 @@ function registerInvestigateIssue(
                   updatedAt
                 }
               }
-              customFields {
-                edges {
-                  value
-                  customField {
-                    name
-                  }
-                }
-              }
             }
           }
         `;
@@ -515,22 +507,16 @@ function registerInvestigateIssue(
                 updatedAt: string;
               }>;
             };
-            customFields?: {
-              edges: Array<{
-                value: string | number | null;
-                customField: { name: string };
-              }>;
-            };
           };
         };
 
         const issue = data.issue;
 
-        // Extract base branch from Linear custom field (case-insensitive match)
-        const branchField = issue.customFields?.edges.find(
-          (e) => e.customField.name.toLowerCase() === "base branch" && typeof e.value === "string" && e.value.trim() !== "",
+        // Extract base branch from labels with "branch:" prefix (e.g. "branch:develop")
+        const branchLabel = issue.labels.nodes.find(
+          (l) => l.name.toLowerCase().startsWith("branch:"),
         );
-        const customFieldBranch = branchField ? String(branchField.value).trim() : undefined;
+        const labelBranch = branchLabel ? branchLabel.name.slice("branch:".length).trim() : undefined;
 
         // Transform comments
         const allComments: LinearComment[] = issue.comments.nodes.map((c) => ({
@@ -641,7 +627,7 @@ ${aiAnalysis.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`;
           enrichedDescription,
           issue.url,
           labels,
-          baseBranch || customFieldBranch || project.settings?.mainBranch,
+          baseBranch || labelBranch || project.settings?.mainBranch,
           aiAnalysis.impactScore,
         );
 
