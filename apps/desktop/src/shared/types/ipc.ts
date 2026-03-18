@@ -129,6 +129,8 @@ import type {
   LinearInvestigationResult,
   LinearInvestigationStatus,
   LinearSyncEvent,
+  LinearSyncEngineStatus,
+  LinearSyncEngineEvent,
   GitHubRepository,
   GitHubIssue,
   GitHubSyncStatus,
@@ -827,7 +829,15 @@ export interface ElectronAPI {
     taskId: string,
   ) => Promise<IPCResult<LinearSyncEvent>>;
 
+  // Linear sync engine
+  startLinearSync: (projectId: string) => Promise<IPCResult<LinearSyncEngineStatus>>;
+  stopLinearSync: (projectId: string) => Promise<IPCResult>;
+  getLinearSyncStatus: (projectId: string) => Promise<IPCResult<LinearSyncEngineStatus>>;
+
   // Linear event listeners
+  onLinearSyncEngineEvent: (
+    callback: (event: LinearSyncEngineEvent) => void,
+  ) => () => void;
   onLinearInvestigationProgress: (
     callback: (projectId: string, status: LinearInvestigationStatus) => void,
   ) => () => void;

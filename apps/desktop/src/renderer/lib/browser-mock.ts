@@ -451,7 +451,13 @@ const browserMockAPI: ElectronAPI = {
   openLogsFolder: async () => ({ success: false, error: 'Not available in browser mode' }),
   copyDebugInfo: async () => ({ success: false, error: 'Not available in browser mode' }),
   getRecentErrors: async () => [],
-  listLogFiles: async () => []
+  listLogFiles: async () => [],
+
+  // Linear sync engine (browser mock stubs)
+  startLinearSync: async () => ({ success: false, error: 'Not available in browser mode' }),
+  stopLinearSync: async () => ({ success: false, error: 'Not available in browser mode' }),
+  getLinearSyncStatus: async () => ({ success: true, data: { running: false, lastSyncAt: null, issueCount: 0, pendingOutbound: 0, deadLetterCount: 0 } }),
+  onLinearSyncEngineEvent: () => () => {},
 };
 
 /**

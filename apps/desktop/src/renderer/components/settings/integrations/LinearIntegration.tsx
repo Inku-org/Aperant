@@ -261,9 +261,9 @@ function SyncEngineControls({ projectId }: SyncEngineControlsProps) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const result = await (window.electronAPI.linear as any).getLinearSyncStatus(projectId);
+      const result = await window.electronAPI.getLinearSyncStatus(projectId);
       if (result.success) {
-        setSyncStatus(result.data);
+        setSyncStatus(result.data ?? null);
       }
     } catch {
       // Ignore errors silently
@@ -275,7 +275,7 @@ function SyncEngineControls({ projectId }: SyncEngineControlsProps) {
   }, [fetchStatus]);
 
   useEffect(() => {
-    const cleanup = (window.electronAPI.linear as any).onLinearSyncEngineEvent(
+    const cleanup = window.electronAPI.onLinearSyncEngineEvent(
       (event: LinearSyncEngineEvent) => {
         // Refresh status on any sync engine event
         fetchStatus();
@@ -287,7 +287,7 @@ function SyncEngineControls({ projectId }: SyncEngineControlsProps) {
   const handleStartSync = async () => {
     setIsLoading(true);
     try {
-      await (window.electronAPI.linear as any).startLinearSync(projectId);
+      await window.electronAPI.startLinearSync(projectId);
       await fetchStatus();
     } finally {
       setIsLoading(false);
@@ -297,7 +297,7 @@ function SyncEngineControls({ projectId }: SyncEngineControlsProps) {
   const handleStopSync = async () => {
     setIsLoading(true);
     try {
-      await (window.electronAPI.linear as any).stopLinearSync(projectId);
+      await window.electronAPI.stopLinearSync(projectId);
       await fetchStatus();
     } finally {
       setIsLoading(false);
