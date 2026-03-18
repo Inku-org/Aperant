@@ -231,7 +231,7 @@ export function registerAgenteventsHandlers(
                 const rawSettings = readSettingsFile();
                 const settings = { ...DEFAULT_APP_SETTINGS, ...rawSettings };
                 if (settings.autoStartLowImpact) {
-                  const threshold = Math.max(0, Math.min(100, Number(settings.autoStartImpactThreshold) || 20));
+                  const threshold = Math.max(0, Math.min(100, settings.autoStartImpactThreshold ?? 20));
                   if (impactScore > threshold) {
                     console.warn(`[Task ${taskId}] Impact score ${impactScore} > threshold ${threshold} — task stays in backlog`);
                     return;
