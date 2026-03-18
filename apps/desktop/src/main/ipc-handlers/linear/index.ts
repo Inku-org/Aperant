@@ -16,7 +16,7 @@ import { registerLinearConnectionHandlers } from './connection-handlers';
 import { registerLinearIssueHandlers } from './issue-handlers';
 import { registerLinearInvestigationHandlers } from './investigation-handlers';
 import { registerLinearImportHandlers } from './import-handlers';
-import { registerLinearSyncHandlers } from './sync-handlers';
+import { registerLinearSyncHandlers, registerSyncEngineHandlers } from './sync-handlers';
 
 /**
  * Register all Linear-related IPC handlers
@@ -30,6 +30,7 @@ export function registerLinearHandlers(
   registerLinearInvestigationHandlers(agentManager, getMainWindow);
   registerLinearImportHandlers(agentManager);
   registerLinearSyncHandlers(agentManager, getMainWindow);
+  registerSyncEngineHandlers(agentManager, getMainWindow);
 }
 
 // Re-export utilities for potential external use

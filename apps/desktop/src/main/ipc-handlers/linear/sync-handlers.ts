@@ -5,7 +5,7 @@
 import { ipcMain } from "electron";
 import type { BrowserWindow } from "electron";
 import path from "path";
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, readdirSync } from "fs";
 import {
   IPC_CHANNELS,
   getSpecsDir,
@@ -19,34 +19,19 @@ import type {
 import { projectStore } from "../../project-store";
 import { AgentManager } from "../../agent";
 import { getLinearApiKey, linearGraphQL } from "./utils";
+import { parseEnvFile } from "../utils";
+import { LinearSyncEngine } from "../../linear-sync";
+import type { SyncEngineConfig, SyncEngineStatus } from "../../linear-sync";
+import { mapTaskStatusToLinearStateType } from "../../linear-sync/status-mapping";
 
-/**
- * Map Aperant task status to Linear workflow state type.
- * Linear states: triage | backlog | unstarted | started | completed | canceled
- */
-function mapTaskStatusToLinearStateType(status: string): string | null {
-  switch (status) {
-    case "backlog":
-      return "backlog";
-    case "queue":
-      return "unstarted";
-    case "in_progress":
-    case "ai_review":
-    case "human_review":
-    case "building":
-    case "planning":
-    case "spec_creation":
-      return "started";
-    case "done":
-    case "pr_created":
-    case "merged":
-      return "completed";
-    case "error":
-      // Don't sync error states
-      return null;
-    default:
-      return null;
-  }
+// Singleton engine per project
+const syncEngines = new Map<string, LinearSyncEngine>();
+
+/** Get the sync engine for a project (used by agent event integration) */
+export function getSyncEngine(
+  projectId: string,
+): LinearSyncEngine | undefined {
+  return syncEngines.get(projectId);
 }
 
 /**
@@ -339,4 +324,222 @@ export function registerLinearSyncHandlers(
   getMainWindow: () => BrowserWindow | null,
 ): void {
   registerSyncIssueStatus(agentManager, getMainWindow);
+}
+
+/**
+ * Helper: read a Linear env variable from the project's .env file.
+ */
+function getLinearEnvVar(
+  project: { path: string; autoBuildPath: string },
+  varName: string,
+): string | null {
+  if (!project.autoBuildPath) return null;
+  const envPath = path.join(project.path, project.autoBuildPath, ".env");
+  if (!existsSync(envPath)) return null;
+
+  try {
+    const content = readFileSync(envPath, "utf-8");
+    const vars = parseEnvFile(content);
+    return vars[varName] || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Register sync engine lifecycle IPC handlers (start/stop/status).
+ */
+export function registerSyncEngineHandlers(
+  agentManager: AgentManager,
+  getMainWindow: () => BrowserWindow | null,
+): void {
+  // Start sync engine for a project
+  ipcMain.handle(
+    IPC_CHANNELS.LINEAR_START_SYNC,
+    async (_, projectId: string): Promise<IPCResult<SyncEngineStatus>> => {
+      // Already running?
+      if (syncEngines.has(projectId)) {
+        const engine = syncEngines.get(projectId)!;
+        return { success: true, data: engine.getStatus() };
+      }
+
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        return { success: false, error: "Project not found" };
+      }
+
+      const apiKey = getLinearApiKey(project);
+      if (!apiKey) {
+        return { success: false, error: "No Linear API key configured" };
+      }
+
+      const teamId = getLinearEnvVar(project, "LINEAR_TEAM_ID");
+      if (!teamId) {
+        return { success: false, error: "No Linear team ID configured" };
+      }
+
+      const linearProjectId =
+        getLinearEnvVar(project, "LINEAR_PROJECT_ID") || undefined;
+
+      try {
+        const specsBaseDir = getSpecsDir(project.autoBuildPath);
+        const specsDir = path.join(project.path, specsBaseDir);
+
+        const config: SyncEngineConfig = {
+          projectPath: project.path,
+          autoBuildPath: project.autoBuildPath,
+          apiKey,
+          teamId,
+          projectId: linearProjectId,
+        };
+
+        const engine = new LinearSyncEngine(config, specsDir);
+
+        // Wire sync engine events to the renderer
+        engine.on("sync-cycle-complete", (result: unknown) => {
+          getMainWindow()?.webContents.send(
+            IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+            projectId,
+            { type: "sync-cycle-complete", result },
+          );
+        });
+
+        engine.on("sync-error", (message: string) => {
+          getMainWindow()?.webContents.send(
+            IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+            projectId,
+            { type: "sync-error", message },
+          );
+        });
+
+        engine.on("flush-error", (message: string) => {
+          getMainWindow()?.webContents.send(
+            IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+            projectId,
+            { type: "flush-error", message },
+          );
+        });
+
+        engine.on(
+          "issue-canceled",
+          (issueIdentifier: string, _issueId: string) => {
+            // Find the task spec linked to this issue and kill any running agent
+            const specsBaseDir2 = getSpecsDir(project.autoBuildPath);
+            const specsDirPath = path.join(project.path, specsBaseDir2);
+
+            if (existsSync(specsDirPath)) {
+              try {
+                const specDirs = readdirSync(specsDirPath, {
+                  withFileTypes: true,
+                });
+                for (const dirent of specDirs) {
+                  if (!dirent.isDirectory()) continue;
+                  const metaPath = path.join(
+                    specsDirPath,
+                    dirent.name,
+                    "task_metadata.json",
+                  );
+                  if (!existsSync(metaPath)) continue;
+                  try {
+                    const meta: TaskMetadata = JSON.parse(
+                      readFileSync(metaPath, "utf-8"),
+                    );
+                    if (meta.linearIdentifier === issueIdentifier) {
+                      agentManager.killTask(dirent.name);
+                      break;
+                    }
+                  } catch {
+                    // Skip malformed metadata
+                  }
+                }
+              } catch {
+                // Skip read errors
+              }
+            }
+
+            getMainWindow()?.webContents.send(
+              IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+              projectId,
+              { type: "issue-canceled", issueIdentifier },
+            );
+          },
+        );
+
+        engine.on("started", () => {
+          getMainWindow()?.webContents.send(
+            IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+            projectId,
+            { type: "started" },
+          );
+        });
+
+        engine.on("stopped", () => {
+          getMainWindow()?.webContents.send(
+            IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT,
+            projectId,
+            { type: "stopped" },
+          );
+        });
+
+        syncEngines.set(projectId, engine);
+        await engine.start();
+
+        return { success: true, data: engine.getStatus() };
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to start sync engine",
+        };
+      }
+    },
+  );
+
+  // Stop sync engine for a project
+  ipcMain.handle(
+    IPC_CHANNELS.LINEAR_STOP_SYNC,
+    async (_, projectId: string): Promise<IPCResult<void>> => {
+      const engine = syncEngines.get(projectId);
+      if (!engine) {
+        return { success: true, data: undefined };
+      }
+
+      try {
+        await engine.stop();
+        syncEngines.delete(projectId);
+        return { success: true, data: undefined };
+      } catch (error) {
+        return {
+          success: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Failed to stop sync engine",
+        };
+      }
+    },
+  );
+
+  // Get sync engine status
+  ipcMain.handle(
+    IPC_CHANNELS.LINEAR_GET_SYNC_STATUS,
+    async (_, projectId: string): Promise<IPCResult<SyncEngineStatus>> => {
+      const engine = syncEngines.get(projectId);
+      if (!engine) {
+        return {
+          success: true,
+          data: {
+            running: false,
+            lastSyncAt: null,
+            issueCount: 0,
+            pendingOutbound: 0,
+            deadLetterCount: 0,
+          },
+        };
+      }
+      return { success: true, data: engine.getStatus() };
+    },
+  );
 }
