@@ -358,6 +358,9 @@ export interface AppSettings {
   sidebarCollapsed?: boolean;
   // GPU acceleration for terminal rendering (WebGL)
   gpuAcceleration?: GpuAcceleration;
+  // Auto-start: automatically start task execution for low-impact Linear issues
+  autoStartLowImpact?: boolean;
+  autoStartImpactThreshold?: number;
 }
 
 // GPU acceleration mode for terminal WebGL rendering
