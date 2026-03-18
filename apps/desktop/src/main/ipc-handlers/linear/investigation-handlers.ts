@@ -455,7 +455,7 @@ function registerInvestigateIssue(
           message: "Fetching issue details...",
         });
 
-        // Fetch the issue with comments
+        // Fetch the issue with comments and custom fields
         const query = `
           query($issueId: String!) {
             issue(id: $issueId) {
@@ -484,6 +484,14 @@ function registerInvestigateIssue(
                   updatedAt
                 }
               }
+              customFields {
+                edges {
+                  value
+                  customField {
+                    name
+                  }
+                }
+              }
             }
           }
         `;
@@ -507,10 +515,22 @@ function registerInvestigateIssue(
                 updatedAt: string;
               }>;
             };
+            customFields?: {
+              edges: Array<{
+                value: string | number | null;
+                customField: { name: string };
+              }>;
+            };
           };
         };
 
         const issue = data.issue;
+
+        // Extract base branch from Linear custom field (case-insensitive match)
+        const branchField = issue.customFields?.edges.find(
+          (e) => e.customField.name.toLowerCase() === "base branch" && typeof e.value === "string" && e.value.trim() !== "",
+        );
+        const customFieldBranch = branchField ? String(branchField.value).trim() : undefined;
 
         // Transform comments
         const allComments: LinearComment[] = issue.comments.nodes.map((c) => ({
@@ -621,7 +641,7 @@ ${aiAnalysis.acceptanceCriteria.map((c) => `- ${c}`).join("\n")}`;
           enrichedDescription,
           issue.url,
           labels,
-          baseBranch || project.settings?.mainBranch,
+          baseBranch || customFieldBranch || project.settings?.mainBranch,
           aiAnalysis.impactScore,
         );
 
