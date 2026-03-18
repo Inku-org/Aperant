@@ -187,6 +187,16 @@ export interface TaskMetadata {
   linearIssueId?: string;  // Reference to Linear issue if from Linear
   linearIdentifier?: string;  // Linear issue identifier (e.g., 'ABC-123')
   linearUrl?: string;  // Linear issue URL
+  /** Comments synced from Linear */
+  linearComments?: Array<{
+    id: string;
+    body: string;
+    authorName: string;
+    createdAt: string;
+    isAperant: boolean;
+  }>;
+  /** Current sync status for this task */
+  linearSyncStatus?: 'synced' | 'pending' | 'error';
   githubIssueNumber?: number;  // Reference to GitHub issue number if from GitHub (single issue)
   githubIssueNumbers?: number[];  // Reference to multiple GitHub issues if from a batch
   githubUrl?: string;  // GitHub issue URL

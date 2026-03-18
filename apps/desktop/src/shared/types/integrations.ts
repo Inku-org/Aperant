@@ -119,6 +119,24 @@ export interface LinearSyncEvent {
   error?: string;
 }
 
+/** Status of the Linear sync engine (sent to renderer) */
+export interface LinearSyncEngineStatus {
+  running: boolean;
+  lastSyncAt: string | null;
+  issueCount: number;
+  pendingOutbound: number;
+  deadLetterCount: number;
+  lastError?: string;
+}
+
+/** A sync event emitted to the renderer for UI updates */
+export interface LinearSyncEngineEvent {
+  type: 'issue_created' | 'issue_updated' | 'issue_canceled' | 'comments_received' | 'outbound_flushed' | 'sync_error';
+  issueIdentifier?: string;
+  message: string;
+  timestamp: string;
+}
+
 // ============================================
 // GitHub Integration Types
 // ============================================
