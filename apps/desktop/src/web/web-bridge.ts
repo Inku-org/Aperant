@@ -66,7 +66,7 @@ export function createWebBridge(ws: WebSocket): WebBridge {
 
   return {
     invokeIpc<T>(channel: string, ...args: unknown[]): Promise<T> {
-      const id = crypto.randomUUID();
+      const id = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       ws.send(JSON.stringify({ type: "invoke", id, channel, args }));
       return new Promise<T>((resolve, reject) => {
         pendingRequests.set(id, {

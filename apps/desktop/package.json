@@ -49,7 +49,7 @@
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit --incremental",
     "dev:web:server": "npx tsx src/server/index.ts",
-    "dev:web:client": "npx vite --config vite.web.config.ts",
+    "dev:web:client": "npx vite --config vite.web.config.ts --host",
     "dev:web": "concurrently \"npm run dev:web:server\" \"npm run dev:web:client\"",
     "build:web": "vite build --config vite.web.config.ts",
     "start:web": "npx tsx src/server/index.ts"
