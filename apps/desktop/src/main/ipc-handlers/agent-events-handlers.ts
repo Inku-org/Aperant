@@ -20,6 +20,8 @@ import { findTaskAndProject } from "./task/shared";
 import { safeSendToRenderer } from "./utils";
 import { getClaudeProfileManager } from "../claude-profile-manager";
 import { taskStateManager } from "../task-state-manager";
+import { readSettingsFile } from "../settings-utils";
+import { DEFAULT_APP_SETTINGS } from "../../shared/constants/config";
 
 // Timeout for fallback safety net to check if task is still stuck after process exit
 const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
@@ -209,6 +211,37 @@ export function registerAgenteventsHandlers(
           const specDir = path.join(specProject.path, specsBaseDir, specTask.specId);
           const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
           if (existsSync(specFilePath)) {
+            // Gate: when autoStartLowImpact is enabled, block Linear tasks above impact threshold
+            try {
+              // Read impact score — prefer in-memory, fall back to disk
+              let impactScore = specTask.metadata?.impactScore;
+              const sourceType = specTask.metadata?.sourceType;
+              if (impactScore == null && sourceType === 'linear') {
+                const metadataPath = path.join(specDir, 'task_metadata.json');
+                if (existsSync(metadataPath)) {
+                  const raw = readFileSync(metadataPath, 'utf-8');
+                  const diskMetadata = safeParseJson<Record<string, unknown>>(raw);
+                  if (diskMetadata && typeof diskMetadata.impactScore === 'number') {
+                    impactScore = diskMetadata.impactScore as number;
+                  }
+                }
+              }
+
+              if (sourceType === 'linear' && impactScore != null) {
+                const rawSettings = readSettingsFile();
+                const settings = { ...DEFAULT_APP_SETTINGS, ...rawSettings };
+                if (settings.autoStartLowImpact) {
+                  const threshold = Math.max(0, Math.min(100, Number(settings.autoStartImpactThreshold) || 20));
+                  if (impactScore > threshold) {
+                    console.warn(`[Task ${taskId}] Impact score ${impactScore} > threshold ${threshold} — task stays in backlog`);
+                    return;
+                  }
+                }
+              }
+            } catch (err) {
+              console.error(`[agent-events-handlers] Auto-start gate check failed, proceeding with execution:`, err);
+              // On error, fall through to existing behavior (always start)
+            }
             console.warn(`[Task ${taskId}] Spec created successfully — starting task execution`);
             // Re-watch the spec directory for the build phase
             fileWatcher.watch(taskId, specDir).catch((err) => {
