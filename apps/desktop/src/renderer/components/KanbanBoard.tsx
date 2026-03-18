@@ -61,6 +61,7 @@ function isValidDropColumn(id: string): id is typeof TASK_STATUS_COLUMNS[number]
  */
 function getVisualColumn(status: TaskStatus): typeof TASK_STATUS_COLUMNS[number] {
   if (status === 'pr_created') return 'done';
+  if (status === 'canceled') return 'done';
   if (status === 'error') return 'human_review';
   return status;
 }
@@ -1324,7 +1325,8 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
       human_review: [],
       done: [],
       pr_created: [],
-      error: []
+      error: [],
+      canceled: []
     };
 
     for (const status of Object.keys(taskOrder) as Array<keyof typeof taskOrder>) {

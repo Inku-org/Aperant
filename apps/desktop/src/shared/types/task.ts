@@ -5,7 +5,7 @@
 import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
 
-export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
+export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error' | 'canceled';
 
 // Maps task status columns to ordered task IDs for kanban board reordering
 export type TaskOrderState = Record<TaskStatus, string[]>;

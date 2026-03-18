@@ -8,6 +8,7 @@
     "review": "Review",
     "prCreated": "PR Created",
     "complete": "Complete",
+    "canceled": "Canceled",
     "archived": "Archived"
   },
   "actions": {
@@ -63,7 +64,8 @@
     "human_review": "Human Review",
     "done": "Done",
     "pr_created": "PR Created",
-    "error": "Error"
+    "error": "Error",
+    "canceled": "Canceled"
   },
   "kanban": {
     "emptyBacklog": "No tasks planned",

@@ -190,7 +190,8 @@ function createEmptyTaskOrder(): TaskOrderState {
     human_review: [],
     done: [],
     pr_created: [],
-    error: []
+    error: [],
+    canceled: []
   };
 }
 
@@ -618,7 +619,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           human_review: isValidColumnArray(parsed.human_review) ? parsed.human_review : emptyOrder.human_review,
           done: isValidColumnArray(parsed.done) ? parsed.done : emptyOrder.done,
           pr_created: isValidColumnArray(parsed.pr_created) ? parsed.pr_created : emptyOrder.pr_created,
-          error: isValidColumnArray(parsed.error) ? parsed.error : emptyOrder.error
+          error: isValidColumnArray(parsed.error) ? parsed.error : emptyOrder.error,
+          canceled: isValidColumnArray(parsed.canceled) ? parsed.canceled : emptyOrder.canceled
         };
 
         debugLog('[TaskStore.loadTaskOrder] Loaded task order:', {
