@@ -52,5 +52,23 @@
     "medium": "Medium",
     "low": "Low",
     "none": "No priority"
+  },
+  "sync": {
+    "aperantBot": "Aperant Bot",
+    "noComments": "No comments yet",
+    "commentsTitle": "Comments — {{identifier}}",
+    "syncStatus": "Sync Status",
+    "syncRunning": "Sync active",
+    "syncStopped": "Sync stopped",
+    "pollInterval": "Poll interval (seconds)",
+    "startSync": "Start Sync",
+    "stopSync": "Stop Sync",
+    "pendingEvents": "Pending events",
+    "deadLetterEvents": "Failed events",
+    "lastSynced": "Last synced",
+    "verbosity": "Comment verbosity",
+    "verbosityAll": "All events",
+    "verbosityMilestones": "Milestones only",
+    "verbosityNone": "Status only"
   }
 }

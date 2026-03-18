@@ -52,5 +52,23 @@
     "medium": "Moyen",
     "low": "Faible",
     "none": "Sans priorité"
+  },
+  "sync": {
+    "aperantBot": "Bot Aperant",
+    "noComments": "Aucun commentaire",
+    "commentsTitle": "Commentaires — {{identifier}}",
+    "syncStatus": "État de la synchronisation",
+    "syncRunning": "Synchronisation active",
+    "syncStopped": "Synchronisation arrêtée",
+    "pollInterval": "Intervalle de sondage (secondes)",
+    "startSync": "Démarrer la synchronisation",
+    "stopSync": "Arrêter la synchronisation",
+    "pendingEvents": "Événements en attente",
+    "deadLetterEvents": "Événements échoués",
+    "lastSynced": "Dernière synchronisation",
+    "verbosity": "Verbosité des commentaires",
+    "verbosityAll": "Tous les événements",
+    "verbosityMilestones": "Jalons uniquement",
+    "verbosityNone": "Statut uniquement"
   }
 }
