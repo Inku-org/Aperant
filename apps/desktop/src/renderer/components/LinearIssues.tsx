@@ -82,9 +82,9 @@ export function LinearIssues({
   }, []);
 
   const handleStartInvestigation = useCallback(
-    (selectedCommentIds: string[]) => {
+    (selectedCommentIds: string[], baseBranch?: string) => {
       if (selectedIssueForInvestigation) {
-        startInvestigation(selectedIssueForInvestigation, selectedCommentIds);
+        startInvestigation(selectedIssueForInvestigation, selectedCommentIds, baseBranch);
       }
     },
     [selectedIssueForInvestigation, startInvestigation],

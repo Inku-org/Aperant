@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Sparkles, Loader2, CheckCircle2, MessageCircle } from "lucide-react";
+import { Sparkles, Loader2, CheckCircle2, MessageCircle, ChevronDown, ChevronRight, GitBranch } from "lucide-react";
 import { Button } from "../../ui/button";
 import { Progress } from "../../ui/progress";
 import { Checkbox } from "../../ui/checkbox";
 import { ScrollArea } from "../../ui/scroll-area";
+import { Input } from "../../ui/input";
 import {
   Dialog,
   DialogContent,
@@ -44,6 +45,8 @@ export function InvestigationDialog({
   const [fetchCommentsError, setFetchCommentsError] = useState<string | null>(
     null,
   );
+  const [baseBranch, setBaseBranch] = useState("");
+  const [showOptions, setShowOptions] = useState(false);
 
   // Fetch comments when dialog opens
   useEffect(() => {
@@ -54,6 +57,8 @@ export function InvestigationDialog({
       setComments([]);
       setSelectedCommentIds([]);
       setFetchCommentsError(null);
+      setBaseBranch("");
+      setShowOptions(false);
 
       window.electronAPI
         .getLinearIssueComments(projectId, selectedIssue.id)
@@ -102,7 +107,7 @@ export function InvestigationDialog({
   };
 
   const handleStartInvestigation = () => {
-    onStartInvestigation(selectedCommentIds);
+    onStartInvestigation(selectedCommentIds, baseBranch || undefined);
   };
 
   return (
@@ -232,6 +237,39 @@ export function InvestigationDialog({
                 </ul>
               </div>
             )}
+
+            {/* Options section */}
+            <div className="border border-border rounded-lg">
+              <button
+                type="button"
+                className="w-full flex items-center gap-2 p-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setShowOptions(!showOptions)}
+              >
+                {showOptions ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+                {t("linear.options", "Options")}
+              </button>
+              {showOptions && (
+                <div className="px-3 pb-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <GitBranch className="h-4 w-4 text-muted-foreground" />
+                    <label htmlFor="baseBranch" className="text-sm font-medium text-foreground">
+                      {t("linear.baseBranch", "Base branch")}
+                    </label>
+                  </div>
+                  <Input
+                    id="baseBranch"
+                    placeholder={t("linear.baseBranchPlaceholder", "Leave empty to use project default")}
+                    value={baseBranch}
+                    onChange={(e) => setBaseBranch(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
+            </div>
           </div>
         ) : (
           <div className="space-y-4">

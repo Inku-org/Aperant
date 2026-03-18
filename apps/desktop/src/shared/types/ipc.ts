@@ -823,6 +823,7 @@ export interface ElectronAPI {
     projectId: string,
     issueId: string,
     selectedCommentIds?: string[],
+    baseBranch?: string,
   ) => void;
   syncLinearIssueStatus: (
     projectId: string,

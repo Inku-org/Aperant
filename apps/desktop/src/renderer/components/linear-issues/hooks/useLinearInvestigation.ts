@@ -69,7 +69,7 @@ export function useLinearInvestigation(projectId: string | undefined) {
   }, [projectId]);
 
   const startInvestigation = useCallback(
-    (issue: LinearIssue, selectedCommentIds?: string[]) => {
+    (issue: LinearIssue, selectedCommentIds?: string[], baseBranch?: string) => {
       if (projectId) {
         setInvestigationStatus({
           phase: "fetching",
@@ -85,6 +85,7 @@ export function useLinearInvestigation(projectId: string | undefined) {
           projectId,
           issue.id,
           selectedCommentIds,
+          baseBranch,
         );
       }
     },

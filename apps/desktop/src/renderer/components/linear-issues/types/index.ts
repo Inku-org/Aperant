@@ -43,7 +43,7 @@ export interface LinearInvestigationDialogProps {
   onOpenChange: (open: boolean) => void;
   selectedIssue: LinearIssue | null;
   investigationStatus: LinearInvestigationStatus;
-  onStartInvestigation: (selectedCommentIds: string[]) => void;
+  onStartInvestigation: (selectedCommentIds: string[], baseBranch?: string) => void;
   onClose: () => void;
   projectId?: string;
 }
