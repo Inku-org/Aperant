@@ -112,6 +112,7 @@ export function SectionRouter({
               linearConnectionStatus={linearConnectionStatus}
               isCheckingLinear={isCheckingLinear}
               onOpenLinearImport={onOpenLinearImport}
+              projectId={project.id}
             />
           </InitializationGuard>
         </SettingsSection>

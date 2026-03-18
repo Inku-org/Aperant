@@ -1,10 +1,12 @@
-import { Radio, Import, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Radio, Import, Eye, EyeOff, Loader2, CheckCircle2, AlertCircle, Play, Square } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Label } from '../../ui/label';
 import { Switch } from '../../ui/switch';
 import { Separator } from '../../ui/separator';
-import type { ProjectEnvConfig, LinearSyncStatus } from '../../../../shared/types';
+import type { ProjectEnvConfig, LinearSyncStatus, LinearSyncEngineStatus, LinearSyncEngineEvent } from '../../../../shared/types';
 
 interface LinearIntegrationProps {
   envConfig: ProjectEnvConfig | null;
@@ -14,6 +16,7 @@ interface LinearIntegrationProps {
   linearConnectionStatus: LinearSyncStatus | null;
   isCheckingLinear: boolean;
   onOpenLinearImport: () => void;
+  projectId: string;
 }
 
 /**
@@ -27,7 +30,8 @@ export function LinearIntegration({
   setShowLinearKey,
   linearConnectionStatus,
   isCheckingLinear,
-  onOpenLinearImport
+  onOpenLinearImport,
+  projectId
 }: LinearIntegrationProps) {
   if (!envConfig) return null;
 
@@ -100,6 +104,12 @@ export function LinearIntegration({
           {envConfig.linearRealtimeSync && <RealtimeSyncWarning />}
 
           <Separator />
+
+          {linearConnectionStatus?.connected && (
+            <SyncEngineControls projectId={projectId} />
+          )}
+
+          {linearConnectionStatus?.connected && <Separator />}
 
           <TeamProjectIds
             teamId={envConfig.linearTeamId || ''}
@@ -236,6 +246,127 @@ function TeamProjectIds({ teamId, projectId, onTeamIdChange, onProjectIdChange }
           onChange={(e) => onProjectIdChange(e.target.value)}
         />
       </div>
+    </div>
+  );
+}
+
+interface SyncEngineControlsProps {
+  projectId: string;
+}
+
+function SyncEngineControls({ projectId }: SyncEngineControlsProps) {
+  const { t } = useTranslation(['linear']);
+  const [syncStatus, setSyncStatus] = useState<LinearSyncEngineStatus | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const result = await (window.electronAPI.linear as any).getLinearSyncStatus(projectId);
+      if (result.success) {
+        setSyncStatus(result.data);
+      }
+    } catch {
+      // Ignore errors silently
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  useEffect(() => {
+    const cleanup = (window.electronAPI.linear as any).onLinearSyncEngineEvent(
+      (event: LinearSyncEngineEvent) => {
+        // Refresh status on any sync engine event
+        fetchStatus();
+      },
+    );
+    return cleanup;
+  }, [fetchStatus]);
+
+  const handleStartSync = async () => {
+    setIsLoading(true);
+    try {
+      await (window.electronAPI.linear as any).startLinearSync(projectId);
+      await fetchStatus();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStopSync = async () => {
+    setIsLoading(true);
+    try {
+      await (window.electronAPI.linear as any).stopLinearSync(projectId);
+      await fetchStatus();
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5">
+          <Label className="font-normal text-foreground">{t('linear:sync.syncStatus')}</Label>
+          <p className="text-xs text-muted-foreground">
+            {syncStatus?.running
+              ? t('linear:sync.syncRunning')
+              : t('linear:sync.syncStopped')}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div
+            className={`h-2 w-2 rounded-full ${syncStatus?.running ? 'bg-success' : 'bg-muted-foreground'}`}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={syncStatus?.running ? handleStopSync : handleStartSync}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : syncStatus?.running ? (
+              <>
+                <Square className="h-3 w-3 mr-1.5" />
+                {t('linear:sync.stopSync')}
+              </>
+            ) : (
+              <>
+                <Play className="h-3 w-3 mr-1.5" />
+                {t('linear:sync.startSync')}
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+
+      {syncStatus && (
+        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1.5">
+          {syncStatus.lastSyncAt && (
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">{t('linear:sync.lastSynced')}</span>
+              <span className="text-foreground">
+                {new Date(syncStatus.lastSyncAt).toLocaleString()}
+              </span>
+            </div>
+          )}
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">{t('linear:sync.pendingEvents')}</span>
+            <span className="text-foreground">{syncStatus.pendingOutbound}</span>
+          </div>
+          <div className="flex justify-between text-xs">
+            <span className="text-muted-foreground">{t('linear:sync.deadLetterEvents')}</span>
+            <span className={`${syncStatus.deadLetterCount > 0 ? 'text-warning' : 'text-foreground'}`}>
+              {syncStatus.deadLetterCount}
+            </span>
+          </div>
+          {syncStatus.lastError && (
+            <div className="text-xs text-destructive mt-1">{syncStatus.lastError}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
