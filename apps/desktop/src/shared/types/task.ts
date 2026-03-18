@@ -197,6 +197,8 @@ export interface TaskMetadata {
   }>;
   /** Current sync status for this task */
   linearSyncStatus?: 'synced' | 'pending' | 'error';
+  /** Impact score from Linear investigation (0-100) */
+  impactScore?: number;
   githubIssueNumber?: number;  // Reference to GitHub issue number if from GitHub (single issue)
   githubIssueNumbers?: number[];  // Reference to multiple GitHub issues if from a batch
   githubUrl?: string;  // GitHub issue URL
