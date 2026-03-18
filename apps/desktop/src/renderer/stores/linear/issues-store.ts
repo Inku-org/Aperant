@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { LinearIssue } from '../../../shared/types';
+import type { LinearIssue, LinearSyncEngineStatus, LinearSyncEngineEvent } from '../../../shared/types';
 
 export type LinearIssueFilterState = 'all' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled';
 
@@ -13,6 +13,10 @@ interface LinearIssuesState {
   selectedIssueId: string | null;
   filterState: LinearIssueFilterState;
 
+  // Sync engine state
+  syncEngineStatus: LinearSyncEngineStatus | null;
+  syncEvents: LinearSyncEngineEvent[];
+
   // Actions
   setIssues: (issues: LinearIssue[]) => void;
   addIssue: (issue: LinearIssue) => void;
@@ -22,6 +26,9 @@ interface LinearIssuesState {
   selectIssue: (issueId: string | null) => void;
   setFilterState: (state: LinearIssueFilterState) => void;
   clearIssues: () => void;
+  setSyncEngineStatus: (status: LinearSyncEngineStatus | null) => void;
+  addSyncEvent: (event: LinearSyncEngineEvent) => void;
+  clearSyncEvents: () => void;
 
   // Selectors
   getSelectedIssue: () => LinearIssue | null;
@@ -36,6 +43,8 @@ export const useLinearIssuesStore = create<LinearIssuesState>((set, get) => ({
   error: null,
   selectedIssueId: null,
   filterState: 'all',
+  syncEngineStatus: null,
+  syncEvents: [],
 
   // Actions
   setIssues: (issues) => set({ issues, error: null }),
@@ -63,6 +72,14 @@ export const useLinearIssuesStore = create<LinearIssuesState>((set, get) => ({
     selectedIssueId: null,
     error: null
   }),
+
+  setSyncEngineStatus: (status) => set({ syncEngineStatus: status }),
+
+  addSyncEvent: (event) => set((state) => ({
+    syncEvents: [...state.syncEvents.slice(-49), event],
+  })),
+
+  clearSyncEvents: () => set({ syncEvents: [] }),
 
   // Selectors
   getSelectedIssue: () => {
