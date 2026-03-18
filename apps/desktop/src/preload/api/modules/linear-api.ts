@@ -9,6 +9,8 @@ import type {
   LinearInvestigationStatus,
   LinearInvestigationResult,
   LinearSyncEvent,
+  LinearSyncEngineStatus,
+  LinearSyncEngineEvent,
   IPCResult,
 } from "../../../shared/types";
 import { invokeIpc, sendIpc, createIpcListener } from "./ipc-utils";
@@ -49,6 +51,11 @@ export interface LinearAPI {
     taskId: string,
   ) => Promise<IPCResult<LinearSyncEvent>>;
 
+  // Sync engine control
+  startLinearSync: (projectId: string) => Promise<IPCResult<void>>;
+  stopLinearSync: (projectId: string) => Promise<IPCResult<void>>;
+  getLinearSyncStatus: (projectId: string) => Promise<IPCResult<LinearSyncEngineStatus>>;
+
   // Event listeners
   onLinearInvestigationProgress: (
     callback: (projectId: string, status: LinearInvestigationStatus) => void,
@@ -58,6 +65,9 @@ export interface LinearAPI {
   ) => IpcListenerCleanup;
   onLinearInvestigationError: (
     callback: (projectId: string, error: string) => void,
+  ) => IpcListenerCleanup;
+  onLinearSyncEngineEvent: (
+    callback: (event: LinearSyncEngineEvent) => void,
   ) => IpcListenerCleanup;
 }
 
@@ -121,6 +131,22 @@ export const createLinearAPI = (): LinearAPI => ({
   ): Promise<IPCResult<LinearSyncEvent>> =>
     invokeIpc(IPC_CHANNELS.LINEAR_SYNC_ISSUE_STATUS, projectId, taskId),
 
+  // Sync engine control
+  startLinearSync: (
+    projectId: string,
+  ): Promise<IPCResult<void>> =>
+    invokeIpc(IPC_CHANNELS.LINEAR_START_SYNC, projectId),
+
+  stopLinearSync: (
+    projectId: string,
+  ): Promise<IPCResult<void>> =>
+    invokeIpc(IPC_CHANNELS.LINEAR_STOP_SYNC, projectId),
+
+  getLinearSyncStatus: (
+    projectId: string,
+  ): Promise<IPCResult<LinearSyncEngineStatus>> =>
+    invokeIpc(IPC_CHANNELS.LINEAR_GET_SYNC_STATUS, projectId),
+
   // Event listeners
   onLinearInvestigationProgress: (
     callback: (projectId: string, status: LinearInvestigationStatus) => void,
@@ -136,4 +162,9 @@ export const createLinearAPI = (): LinearAPI => ({
     callback: (projectId: string, error: string) => void,
   ): IpcListenerCleanup =>
     createIpcListener(IPC_CHANNELS.LINEAR_INVESTIGATION_ERROR, callback),
+
+  onLinearSyncEngineEvent: (
+    callback: (event: LinearSyncEngineEvent) => void,
+  ): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.LINEAR_SYNC_ENGINE_EVENT, callback),
 });
