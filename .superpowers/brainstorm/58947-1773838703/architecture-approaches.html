@@ -1,0 +1,88 @@
+<h2>Linear Integration Architecture — 3 Approaches</h2>
+<p class="subtitle">Aperant as source of truth, full bidirectional sync</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Sync Engine (Recommended)</h3>
+      <p>A dedicated <code>LinearSyncEngine</code> service in the main process that owns all synchronization logic.</p>
+      <ul>
+        <li><strong>Poller:</strong> Runs on interval (configurable, default 60s). Fetches issues updated since last sync timestamp. Detects new issues, status changes, new comments, deletions.</li>
+        <li><strong>Event Emitter:</strong> Aperant-side events (status change, agent activity, PR created, QA result) feed into a queue. The engine batches and pushes to Linear as comments/state updates.</li>
+        <li><strong>Conflict Resolution:</strong> Aperant always wins on status/content. Linear wins on deletions/cancellations.</li>
+        <li><strong>State Tracking:</strong> A local <code>sync_state.json</code> per project tracks last sync time, issue mapping, and pending outbound events.</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Clean separation — all sync logic in one place</li>
+          <li>Testable — engine can be unit tested with mock API</li>
+          <li>Resilient — queue survives app restarts</li>
+          <li>Easy to add webhook support later</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>More upfront architecture work</li>
+          <li>New service to maintain</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Extend Existing Handlers</h3>
+      <p>Build on the current IPC handler structure — add polling and outbound sync as new handler modules alongside the existing ones.</p>
+      <ul>
+        <li><strong>New handler:</strong> <code>poll-handlers.ts</code> — setInterval-based polling, diff detection</li>
+        <li><strong>New handler:</strong> <code>outbound-handlers.ts</code> — listen to agent events, push comments/status to Linear</li>
+        <li><strong>Extended types:</strong> Add sync state to existing TaskMetadata</li>
+        <li><strong>No new service:</strong> Everything stays in IPC handler pattern</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Follows existing codebase patterns</li>
+          <li>Less new architecture to learn</li>
+          <li>Faster to build initially</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Sync logic scattered across multiple handlers</li>
+          <li>Harder to test holistically</li>
+          <li>Event ordering harder to guarantee</li>
+          <li>Will likely need refactoring as complexity grows</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid — Sync Engine + Handler Integration</h3>
+      <p>Build the sync engine (Approach A) but wire it through the existing IPC handler pattern so the frontend communicates with it the same way it does everything else.</p>
+      <ul>
+        <li><strong>Core:</strong> <code>LinearSyncEngine</code> class with poller + outbound queue</li>
+        <li><strong>Integration:</strong> Thin IPC handlers that delegate to the engine</li>
+        <li><strong>Events:</strong> Engine emits events that existing stores can subscribe to</li>
+        <li><strong>Webhook ready:</strong> Engine accepts events from either poller or webhook endpoint</li>
+      </ul>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Clean engine + familiar IPC patterns</li>
+          <li>Frontend doesn't need to know about sync internals</li>
+          <li>Best testability</li>
+          <li>Natural webhook upgrade path</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Most code to write initially</li>
+          <li>Slightly more abstraction layers</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2rem; padding: 1.5rem; border-radius: 8px; background: rgba(255,255,255,0.05);">
+  <h3>My Recommendation: Approach A (Sync Engine)</h3>
+  <p>Given the scope — auto-import, bidirectional comments, full activity stream, deletion handling — this is too much logic to scatter across handlers. A dedicated engine keeps it maintainable and testable. Approach C adds unnecessary indirection since the IPC handlers are already thin wrappers.</p>
+</div>

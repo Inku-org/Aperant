@@ -1,0 +1,119 @@
+<h2>Data Flow Architecture</h2>
+<p class="subtitle">LinearSyncEngine — how data moves between Aperant and Linear</p>
+
+<div class="section">
+  <h3>Inbound Flow (Linear → Aperant)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Polling Cycle — runs every 60s (configurable)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 280px;">
+          <div style="color: #7aa2f7; font-weight: bold; margin-bottom: 0.5rem;">1. FETCH</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #7aa2f7;">
+            Linear GraphQL API<br>
+            → Issues updated since <code>lastSyncAt</code><br>
+            → Filter by team/project<br>
+            → Include comments, state, labels<br>
+            → Track <code>updatedAt</code> per issue
+          </div>
+          <br>
+          <div style="color: #bb9af7; font-weight: bold; margin-bottom: 0.5rem;">2. DIFF</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #bb9af7;">
+            Compare fetched issues vs local sync state:<br>
+            → <strong>New issue?</strong> → Auto-create task + spec dir<br>
+            → <strong>New comments?</strong> → Append to task context + notify UI<br>
+            → <strong>Issue deleted/cancelled?</strong> → Archive task, stop agents<br>
+            → <strong>Status changed?</strong> → Log it (Aperant is source of truth, no override)<br>
+            → <strong>Assignee/labels changed?</strong> → Update task metadata
+          </div>
+        </div>
+        <div style="flex: 1; min-width: 280px;">
+          <div style="color: #9ece6a; font-weight: bold; margin-bottom: 0.5rem;">3. APPLY</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #9ece6a;">
+            For each detected change:<br>
+            → Write to spec/context files<br>
+            → Update <code>task_metadata.json</code><br>
+            → Emit events to renderer stores<br>
+            → Update local <code>sync_state.json</code>
+          </div>
+          <br>
+          <div style="color: #f7768e; font-weight: bold; margin-bottom: 0.5rem;">4. DELETION HANDLING</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #f7768e;">
+            Issue deleted or moved to "Cancelled":<br>
+            → Set task status to <code>cancelled</code><br>
+            → Kill running agents for that task<br>
+            → Post final status to Linear (if still exists)<br>
+            → Mark as archived in sync state
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Outbound Flow (Aperant → Linear)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Event Queue — batched, fires on event or on poll cycle</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.8;">
+      <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 280px;">
+          <div style="color: #7aa2f7; font-weight: bold; margin-bottom: 0.5rem;">EVENTS CAPTURED</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #7aa2f7;">
+            <strong>Status changes</strong> → Update Linear issue state<br>
+            <strong>Agent progress</strong> → Comment: "🤖 Planner started subtask 3/5"<br>
+            <strong>PR/branch created</strong> → Comment with link<br>
+            <strong>QA results</strong> → Comment: pass/fail + findings<br>
+            <strong>Spec/plan ready</strong> → Comment with summary<br>
+            <strong>Agent errors</strong> → Comment with error context<br>
+            <strong>Task created in Aperant</strong> → Create Linear issue
+          </div>
+        </div>
+        <div style="flex: 1; min-width: 280px;">
+          <div style="color: #bb9af7; font-weight: bold; margin-bottom: 0.5rem;">QUEUE BEHAVIOR</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #bb9af7;">
+            → Events queued in memory + persisted to disk<br>
+            → Batch flush: group comments per issue<br>
+            → Deduplicate: don't post same status twice<br>
+            → Retry with backoff on API failures<br>
+            → Rate limit aware (Linear: 1500 req/hr)<br>
+            → Survives app restart (read pending from disk)
+          </div>
+          <br>
+          <div style="color: #9ece6a; font-weight: bold; margin-bottom: 0.5rem;">COMMENT FORMAT</div>
+          <div style="padding-left: 1rem; border-left: 2px solid #9ece6a;">
+            All agent comments prefixed with<br>
+            <code>[Aperant]</code> so they're identifiable<br>
+            and can be filtered by the poller<br>
+            (avoids echo loops)
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Sync State (per project)</h3>
+  <div class="mockup">
+    <div class="mockup-header">.auto-claude/linear/sync_state.json</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 0.85rem; line-height: 1.6;">
+<pre style="margin: 0; color: #a9b1d6;">{
+  "lastSyncAt": "2026-03-18T14:30:00Z",
+  "pollIntervalMs": 60000,
+  "issueMap": {
+    "LIN-42": {
+      "taskSpecNumber": "003",
+      "lastSeenUpdatedAt": "2026-03-18T14:25:00Z",
+      "lastCommentId": "comment_abc123",
+      "linearState": "In Progress",
+      "aperantStatus": "building"
+    }
+  },
+  "outboundQueue": [
+    { "type": "comment", "issueId": "LIN-42", "body": "[Aperant] QA passed...", "retries": 0 }
+  ]
+}</pre>
+    </div>
+  </div>
+</div>
